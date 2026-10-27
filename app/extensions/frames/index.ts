@@ -1,7 +1,7 @@
 // Frames: wireframes the user lays out for the agents to fill (port of the Python frames plugin; browser.js is its
 // frames.js). browser.js adds a tool to the palette: drag boxes on the main space, type in each what goes there,
 // then press Implement. All the frames go together, as one message, to the agent picked in the chat (else agent1),
-// so it sees the whole layout and decides how to split the work (alone, or with helpers: guide.md, not code).
+// so it sees the whole layout and decides how to split the work (alone, or with helpers: README.md, not code).
 // A frame is {x, y, width, height, text, sent, to?} (main-space px, where ui_render's place puts a surface), with an
 // id (frame-1, frame-2, ...: never reused). An agent fills it with ui_render(surface="frame-1", place=<its place>);
 // when that surface appears (a ui watcher, host.api.ui.watch), the frame is done and its dashed box goes. The user
@@ -31,7 +31,8 @@ const box = (msg: any, f: any = {}) => Object.fromEntries(["x", "y", "width", "h
 const place = (f: any) => JSON.stringify({ x: f.x, y: f.y, width: f.width, height: f.height });
 
 export default function (pi: ExtensionAPI) {
-  const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8").replaceAll("/app/", host.app + "/");
+  const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8")  // short; README.md: the whole of it, read when it says
+    .replace("README.md", path.join(import.meta.dirname, "README.md"));
   pi.on("before_agent_start", (event) => { event.systemPromptOptions.sections.frames = guide; });
 
   // a frame is done when a surface with its id appears (after all extensions loaded: the ui one may come later)

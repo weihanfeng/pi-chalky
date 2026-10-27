@@ -1,5 +1,5 @@
 // UI surfaces from the page's components (port of the Python ui plugin; browser.js, the page side, is its ui.js).
-// Tools ui_catalog, ui_render, ui_update, ui_delete; the guide (guide.md, copied from ui.py) as a prompt section.
+// Tools ui_catalog, ui_render, ui_update, ui_delete; guide.md, a short prompt section (README.md, copied from ui.py: the whole of it).
 // The surfaces are shared by every agent: one Surfaces object on the host, made by whichever agent loads first.
 // One door: every change goes through change(): it saves, tells every open page, and calls every watcher with the
 // surface, who did it and the words for it ("you moved s1"; none: part of a bigger change). restore() puts back a
@@ -144,8 +144,8 @@ const Place = Type.Optional(Type.Object({ x: Type.Number(), y: Type.Number(), wi
   { description: "pin it at a spot (px from the main space's top-left); leave out to stack it" }));
 
 export default function (pi: ExtensionAPI) {
-  const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8")
-    .replaceAll("/app/state/", host.state + "/").replaceAll("/app/", host.app + "/");
+  const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8")  // short; README.md: the whole of it, read when it says
+    .replace("README.md", path.join(import.meta.dirname, "README.md"));
   pi.on("before_agent_start", (event) => { event.systemPromptOptions.sections.ui = guide; });
   pi.on("resources_discover", () => ({ skillPaths: [path.join(import.meta.dirname, "skills")] }));
 

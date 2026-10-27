@@ -40,7 +40,8 @@ function message(msg: any) {
 }
 
 export default function (pi: ExtensionAPI) {
-  const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8");
+  const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8")  // short; README.md: the whole of it, read when it says
+    .replace("README.md", path.join(import.meta.dirname, "README.md"));
   pi.on("before_agent_start", (event) => { event.systemPromptOptions.sections.doodle = guide; });
 
   host.pageHandlers.set("doodle", (msg: any) => {

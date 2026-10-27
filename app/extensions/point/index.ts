@@ -9,7 +9,7 @@
 // and stays pinned (state/notes.json: {"last", "open": {id: note}}, redrawn after a reload) until the agent calls
 // note_done(id). The user can also close a pin (its ✕): the note is dropped, and taken out of its agent's inbox if
 // its turn hasn't started (the agent never saw it); else its agent is told (a note).
-// The guide (guide.md, copied from point.py) names pi's read tool for pictures (the Python agent: view_image).
+// guide.md: the short prompt section; README.md (copied from point.py): the whole of it, read before a first note.
 import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -39,8 +39,8 @@ function describe(sid: string) {  // a source of a combine, for the agent: cut s
 }
 
 export default function (pi: ExtensionAPI) {
-  const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8")
-    .replace("view_image for pictures", "read shows you pictures").replaceAll("/workspace/", host.work + "/");
+  const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8")  // short; README.md: the whole of it, read when it says
+    .replace("README.md", path.join(import.meta.dirname, "README.md"));
   pi.on("before_agent_start", (event) => { event.systemPromptOptions.sections.point = guide; });
 
   pi.registerTool({

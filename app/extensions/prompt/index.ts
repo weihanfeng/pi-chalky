@@ -7,7 +7,9 @@ export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", (event) => {
     const host = (globalThis as any).chalky;
     event.systemPromptOptions.sections.paths = [
-      `Your code folder: ${host.app} (versioned: each turn that changes it is saved, and the user can roll back)`,
+      `{code} = ${host.app}: your code (versioned: each turn that changes it is saved, and the user can roll back)`,
+      `{work} = ${host.work}: your working folder (<cwd>), for project work and the user's files`,
+      `{data} = ${host.state}: what the agents and apps keep (conversations, app data, surfaces' data; not versioned)`,
       `The host: ${host.root}/server.ts`,
       `pi's docs: ${getDocsPath()}/extensions.md for extensions, examples in ${getExamplesPath()}/extensions/; the rest in `
         + `${getReadmePath()} and ${getDocsPath()}/. Read pi's .md files completely and follow their links.`,

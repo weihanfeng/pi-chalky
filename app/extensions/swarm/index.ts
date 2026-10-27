@@ -31,7 +31,8 @@ const ASK_TIMEOUT = Number(process.env.SWARM_ASK_TIMEOUT || 600);   // seconds; 
 const INBOX_CAP = 50;          // items waiting for one agent
 const NOTES_PER_MINUTE = 20;   // per sender
 const APP_MESSAGES_PER_MINUTE = 30;  // from apps (the page) to agents
-const TEAM = fs.readFileSync(path.join(import.meta.dirname, "team.md"), "utf8");
+const TEAM = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8")  // short; README.md: the whole of it
+  .replace("README.md", path.join(import.meta.dirname, "README.md"));
 
 type Waiter = { resolve: (answer: string) => void } | null;
 type Item = { kind: string; sender: string; text: string; chain: string[]; ts: number; waiter: Waiter; images?: string[] };

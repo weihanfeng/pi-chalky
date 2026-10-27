@@ -7,7 +7,7 @@
 //   POST /files/upload?name=<file name>  the file's bytes: saved in DIR (a safe, new name), returns {path, size}
 //   GET  /files                          [{name, path, size}], newest first; files in folders too ("q3/costs.xlsx")
 //   event "files" {files: [...]}         to every open page, when the list changed
-// The guide (guide.md, copied from files.py) names pi's read tool for pictures (the Python agent: view_image).
+// guide.md (copied from files.py, short enough to be whole) names pi's read tool for pictures (Python: view_image).
 import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -36,8 +36,7 @@ function changed() {  // tell the pages, if the list is not what they were last 
 }
 
 export default function (pi: ExtensionAPI) {
-  const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8")
-    .replace("view_image for pictures", "read shows you pictures").replaceAll("/workspace/", host.work + "/").replaceAll("/workspace.", host.work + ".");
+  const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8");
   pi.on("before_agent_start", (event) => { event.systemPromptOptions.sections.files = guide; });
   pi.on("agent_settled", () => changed());  // the agent may have saved files there
   if (!host.shared.has("files-last")) host.shared.set("files-last", JSON.stringify(listing()));

@@ -10,7 +10,8 @@ extension is one folder, `extensions/<name>/`, holding all of that feature:
 | File          | What it is                                                         |
 |---------------|--------------------------------------------------------------------|
 | `index.ts`    | the extension itself (pi loads it); starts with a header comment    |
-| `guide.md`    | its prompt text (the part you are reading in your own prompt)       |
+| `guide.md`    | its short prompt section (the part you are reading in your own prompt) |
+| `README.md`   | the whole of what the guide says, read when the guide says          |
 | `browser.js`  | its part of the page (the page extension loads every one it finds)  |
 | `skills/`     | skills only this feature needs (its index.ts gives them to pi)      |
 

@@ -203,10 +203,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8")
-    .replaceAll("/workspace/drops", DIR)
-    .replace("look at it with\n  view_image (read_file", "look at it with\n  read (read_document")
-    .replace("- read_file(path)", "- read_document(path)").replace(", doc, ppt, txt)", ", doc, txt)")
-    .replace("For pictures use view_image.", "For pictures use read.");
+  const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8")  // short; README.md: the whole of it, read when it says
+    .replace("README.md", path.join(import.meta.dirname, "README.md"));
   pi.on("before_agent_start", (event) => { event.systemPromptOptions.sections.viewer = guide; });
 }
