@@ -1,0 +1,17 @@
+# pi's logins (made by the model login): never commit
+app/auth.json
+app/models-store.json
+
+# Runtime: conversations, version history, pictures, logs; the agents' workspace
+state/
+state-*/
+workspace/
+
+# What the agents build while running (a fresh install starts with none)
+app/ui/surfaces.json
+app/ui/apps/*
+!app/ui/apps/.keep
+
+# Installed by npm
+node_modules/
+*.log

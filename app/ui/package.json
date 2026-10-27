@@ -1,0 +1,9 @@
+{
+  "name": "chalky-ui",
+  "private": true,
+  "description": "Browser libraries for UI components (served at /ui/node_modules, mapped in chat_ui.html's import map)",
+  "dependencies": {
+    "dompurify": "3.4.16",
+    "marked": "18.0.14"
+  }
+}
