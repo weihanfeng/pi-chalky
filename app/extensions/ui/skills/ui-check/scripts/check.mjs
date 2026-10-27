@@ -18,7 +18,8 @@
 // window), plus a margin, in the window's shape. Nothing matching: the plain shot.
 // Prints: errors (exceptions, console errors, failed requests), layout problems (clipped or overflowing
 // elements, cut-off text), step results, every dialog and how it was answered, screenshot paths. Exit code 1 if
-// anything failed or was found; 2 if there is no browser (it prints the command that downloads one).
+// a step failed or there were errors; layout problems alone don't count (some are meant: the agent judges them,
+// and pi shows an exit code 1 as a failed command); 2 if there is no browser (it prints the command that downloads one).
 // Talks to Chrome over the DevTools Protocol (CDP) with Node's own WebSocket and fetch; no libraries.
 // The browser: $CHROME, else chrome-headless-shell downloaded into BROWSERS, else an installed Chrome, Chromium or Edge.
 import { spawn } from "node:child_process";
@@ -277,7 +278,7 @@ async function main(url, steps, size, shotPath, full, fit) {
     console.log(`title: ${JSON.stringify(layout.title)}, window ${layout.window}; top-level elements: ${layout.top_level}`);
     console.log(`errors (${errors.length}):` + errors.map((e) => `\n  - ${e}`).join(""));
     console.log(`layout problems (${layout.problems.length}):` + layout.problems.map((p) => `\n  - ${p}`).join(""));
-    failed = failed || errors.length > 0 || layout.problems.length > 0;
+    failed = failed || errors.length > 0;  // layout problems: printed, for the agent to judge
   } finally {
     chrome.kill();
     await new Promise((r) => chrome.exitCode !== null ? r() : chrome.on("exit", r));

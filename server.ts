@@ -3,10 +3,10 @@
 //   - runs the web server: its WebSocket /ws, and every route extensions add (the page: extensions/page);
 //   - keeps one pi AgentSession per agent (session name = agent name; saved under state/sessions/<agent>);
 //   - serves /recover: going back to a working version when an agent broke the page (the safety net);
-//   - turns pi's messages into the page's (OpenAI chat format); the page replays pi's session files (compaction
-//     keeps the original entries, so the page still shows everything).
+//   - hands each agent's pi events to the extensions that asked (host.eventHandlers), and tells them when a page
+//     opens (host.connectHandlers). The page extension turns pi's messages into the page's and replays them.
 // Extensions reach the host through globalThis.chalky (pi loads them with jiti, so they don't share our imports).
-// Run: MODEL_BASE_URL=... MODEL_API_KEY=... node server.ts   (Node >= 22.19: it runs the TypeScript as is)
+// Run: MODEL_BASE_URL=... MODEL_API_KEY=... [MODEL_NAME=...] [MODEL_THINKING=...] node server.ts   (Node >= 22.19: it runs the TypeScript as is)
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -20,7 +20,7 @@ const STATE = path.join(ROOT, "state");                   // conversations and d
 const WORK = path.join(ROOT, "workspace");                // the agents' working folder (bash runs here)
 for (const d of [STATE, WORK]) fs.mkdirSync(d, { recursive: true });
 
-type Agent = { name: string; role: string; app?: string; session: any; joined?: boolean; unsubscribe: () => void; replyTo?: string;
+type Agent = { name: string; role: string; app?: string; session: any; unsubscribe: () => void;
   stopped?: boolean };  // stopped: this run was stopped on purpose (host.abort)
 
 const sockets = new Set<any>();
@@ -29,6 +29,9 @@ const host = {
   agents: new Map<string, Agent>(),
   routes: new Map<string, (req: http.IncomingMessage, res: http.ServerResponse) => void>(),  // path -> handler (a path ending in /: also every path under it)
   pageHandlers: new Map<string, (msg: any) => void>(),  // one per extension (not per agent): key -> handler
+  eventHandlers: new Map<string, (agent: string, ev: any) => void>(),  // every pi event of every agent (session.subscribe:
+                                                    // also what pi.on misses, e.g. a message filed while idle); key -> handler
+  connectHandlers: new Map<string, (send: (type: string, data: object) => void) => void>(),  // a page opened: what it gets first
   shared: new Map<string, any>(),                   // state extensions share across agents (e.g. the surfaces)
   reloadAfterTurn: new Set<string>(),               // agents whose extensions load again when their turn ends
   api: {} as Record<string, any>,                   // services extensions offer by name (e.g. swarm); the newest load wins
@@ -55,10 +58,7 @@ const host = {
   // images: pictures sent with the input (pi's {type: "image", data: base64, mimeType}), e.g. doodle's steps.
   async prompt(name: string, input: string, replyTo?: string, images?: { type: "image"; data: string; mimeType: string }[]) {
     const a = host.agents.get(name)!;
-    if (replyTo) {
-      a.session.sessionManager.appendCustomEntry("chalky.turn", { reply_to: replyTo });
-      a.replyTo = replyTo;  // for the user message this run starts with
-    }
+    if (replyTo) a.session.sessionManager.appendCustomEntry("chalky.turn", { reply_to: replyTo });  // for the user message next
     a.stopped = false;
     try {
       await a.session.prompt(input, images?.length ? { images } : undefined);
@@ -114,10 +114,14 @@ const host = {
     await session.bindExtensions({});  // starts the extensions' session (session_start)
     const model = session.modelRuntime.getModel("chalky", process.env.MODEL_NAME || "default");
     if (model) await session.setModel(model);
-    const joined = session.sessionManager.getEntries().some((e: any) => e.type === "message" && e.message.role === "system");
-    const a: Agent = { name, role, app, session, joined, unsubscribe: () => {} };
+    // MODEL_THINKING: pi's thinking level (minimal, low, medium, high, ...), sent as reasoning_effort. Unset: none is
+    // sent and the model uses its own default (pi then says "off", but the model may still think).
+    if (process.env.MODEL_THINKING) session.setThinkingLevel(process.env.MODEL_THINKING);
+    const a: Agent = { name, role, app, session, unsubscribe: () => {} };
     host.agents.set(name, a);
-    a.unsubscribe = session.subscribe((ev: any) => onEvent(a, ev));
+    a.unsubscribe = session.subscribe((ev: any) => {
+      for (const [key, fn] of host.eventHandlers) try { fn(name, ev); } catch (e) { console.error(`event handler ${key}:`, e); }
+    });
     fs.writeFileSync(path.join(dir, "role.json"), JSON.stringify({ role, app }));
     host.broadcast("status", { agents: host.status() });
     return a;
@@ -135,61 +139,7 @@ process.on("uncaughtException", (e) => {
 const text = (content: any) => typeof content === "string" ? content
   : content.filter((p: any) => p.type === "text").map((p: any) => p.text).join("");
 
-// pi message -> the page's message (OpenAI chat format, as the Python harness stored them).
-// first: the agent's first system message, which the page shows as "<agent> joined".
-// replyTo: on the message that starts a turn, who its answer goes to (not on items slipped into a running turn).
-function toChalky(m: any, first = false, replyTo?: string) {
-  const ts = (m.timestamp ?? Date.now()) / 1000;
-  if (m.role === "system") return first ? { role: "system", content: "", ts } : null;
-  if (m.role === "user" || (m.role === "custom" && m.customType === "inbox")) {  // inbox: swarm items filed without a turn
-    return { role: "user", content: text(m.content), ...(replyTo && { reply_to: replyTo }), ts };
-  }
-  if (m.role === "assistant") {
-    const calls = m.content.filter((p: any) => p.type === "toolCall")
-      .map((p: any) => ({ id: p.id, type: "function", function: { name: p.name, arguments: JSON.stringify(p.arguments) } }));
-    const reasoning = m.content.filter((p: any) => p.type === "thinking").map((p: any) => p.thinking).join("\n");
-    return { role: "assistant", content: text(m.content), ...(reasoning && { reasoning }), ...(calls.length && { tool_calls: calls }),
-             ...(m.errorMessage && { content: `error: ${m.errorMessage}` }), ts };
-  }
-  if (m.role === "toolResult")
-    return { role: "tool", tool_call_id: m.toolCallId, content: (m.isError ? "error: " : "") + text(m.content), ts };
-  return null;  // pi's own kinds (custom, compaction summary, ...): not shown
-}
-
 const emit = (type: string, data: object) => host.broadcast(type, data);
-
-// Every message of an agent, from all its session files (older rounds first), in the page's format
-function record(a: Agent) {
-  const current = a.session.sessionManager.getSessionFile();
-  const dir = path.dirname(current);
-  return fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).sort().flatMap((f) => {
-    const p = path.join(dir, f);
-    const entries = p === current ? a.session.sessionManager.getEntries() : SessionManager.open(p, dir).getEntries();
-    let joined = false, replyTo: string | undefined;
-    return entries.flatMap((e: any) => {
-      if (e.type === "custom" && e.customType === "chalky.turn") replyTo = e.data.reply_to;
-      const msg = e.type === "message" ? e.message : e.type === "custom_message" ? { ...e, role: "custom", timestamp: Date.parse(e.timestamp) } : null;
-      if (!msg) return [];
-      const m = toChalky(msg, !joined && msg.role === "system", msg.role === "user" ? replyTo : undefined);
-      if (msg.role === "system") joined = true;
-      if (msg.role === "user") replyTo = undefined;
-      return m ? [{ agent: a.name, ...m }] : [];
-    });
-  });
-}
-
-function onEvent(a: Agent, ev: any) {
-  if (ev.type === "message_end") {
-    const first = ev.message.role === "system" && !a.joined;
-    if (first) a.joined = true;
-    const m = toChalky(ev.message, first, ev.message.role === "user" ? a.replyTo : undefined);
-    if (ev.message.role === "user") a.replyTo = undefined;
-    if (m) emit("message", { agent: a.name, ...m });
-  } else if (ev.type === "agent_start") emit("run_start", { agent: a.name });
-  else if (ev.type === "agent_settled") emit("run_end", { agent: a.name });
-  else if (ev.type === "compaction_end" && ev.result)
-    emit("compacted", { agent: a.name, tokens_before: ev.result.tokensBefore, tokens_after: ev.result.estimatedTokensAfter ?? "?" });
-}
 
 // ---- web server: /ws, and the routes extensions add ----
 const types: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript",
@@ -268,10 +218,9 @@ const server = http.createServer((req, res) => {
 });
 
 new WebSocketServer({ server, path: "/ws" }).on("connection", (sock) => {
-  sock.send(JSON.stringify({ type: "status", agents: host.status() }));
-  // replay every agent's record, in time order, so a reload shows everything
-  for (const m of [...host.agents.values()].flatMap(record).sort((x: any, y: any) => x.ts - y.ts))
-    sock.send(JSON.stringify({ type: "message", ...m }));
+  const send = (type: string, data: object) => sock.send(JSON.stringify({ type, ...data }));
+  send("status", { agents: host.status() });
+  for (const [key, fn] of host.connectHandlers) try { fn(send); } catch (e) { console.error(`connect handler ${key}:`, e); }
   sockets.add(sock);
   sock.on("close", () => sockets.delete(sock));
   sock.on("message", async (raw) => {

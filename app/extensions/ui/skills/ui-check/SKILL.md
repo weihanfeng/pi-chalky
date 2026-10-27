@@ -23,7 +23,9 @@ node scripts/check.mjs URL [STEPS ...] [--size 1280x800] [--shot /tmp/ui.png] [-
   whose dialog you want to accept.
 - It prints errors (uncaught exceptions, console errors, failed requests), layout problems (an element
   cut off by a box that hides overflow, an element sticking out of the window, cut-off text, sideways
-  scrolling), each step's result, and the screenshot path. Exit code 1 means something failed or was found.
+  scrolling), each step's result, and the screenshot path. Exit code 1 means a step failed or there were
+  errors. Layout problems don't change the exit code: judge each one (a decoration meant to bleed off the edge
+  is fine; a cut-off button isn't).
 
 Example: did the map fit, and does pause work?
 ```

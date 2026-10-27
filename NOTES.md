@@ -4,8 +4,8 @@ Question: can the Chalky agent run on pi, with plugins as native pi extensions, 
 
 ## Layout
 - `server.ts`: the host, the fixed core agents can't edit: one pi `AgentSession` per agent, the WebSocket `/ws`, route
-  lookup for what extensions add, pi messages translated to the page's (OpenAI chat format), and `/recover` (the
-  safety net). Serves no page itself.
+  lookup for what extensions add, pi's events handed to extensions (host.eventHandlers, host.connectHandlers), and
+  `/recover` (the safety net). Serves no page itself.
 - `app/`: agent-editable, versioned, and pi's agentDir. Everything is an extension, and one extension is one folder,
   `app/extensions/<name>/`: `index.ts` (pi loads it), and as needed `guide.md` (prompt text), `browser.js` (its part
   of the page), `skills/` (given to pi with `resources_discover`), other files (`ui/components/`, `page/page.html`).
@@ -422,6 +422,27 @@ Seen, not changed:
 - The user's meme-maker app logs "Uncaught SyntaxError: Identifier 'top' has already been declared" (its own
   index.html, made by an agent). Not touched.
 
+## Clean-ups (2026-10-27)
+- Thinking: pi's "off" for an openai-completions model means pi sends no reasoning_effort, so the model uses its
+  own default, and it does think (up to 152 reasoning tokens per answer in agent1's record). As the Python agent
+  did. New optional MODEL_THINKING (minimal, low, medium, high, ...): server.ts calls setThinkingLevel; pi then
+  sends reasoning_effort. Tested with low: the session saved thinkingLevel "low" and the answer came (391).
+- ui-check: check.mjs exits 1 only for failed steps and errors; layout problems are printed but don't count (an
+  exit code 1 shows as a failed command in pi, and the agent's meme app turn looked red for a meant overhang).
+  SKILL.md says to judge each. Tested: the meme app (layout only) exits 0; a page that throws exits 1.
+- The pi-message -> page conversion moved from server.ts to the page extension, so agents can change it too.
+  server.ts now hands every agent's pi event to host.eventHandlers (it still subscribes itself: pi doesn't pass a
+  custom message filed while idle, e.g. a swarm fyi, to extensions' pi.on, only to session.subscribe), and calls
+  host.connectHandlers when a page opens. "joined" and reply_to are read from the session (pi saves a message
+  after its message_end; a prompt update can sit between the "chalky.turn" entry and the user message), so the
+  host's Agent lost `joined` and `replyTo`. Tested: a page opening got 596 messages; a live message came with
+  reply_to; run_start/run_end; idle fyis (from a recovery) shown; one "joined" per session file; the page in
+  Chrome shows the conversation.
+- Not done: pi's preamble ("You are an expert coding assistant operating inside pi..."). pi has no way to replace
+  only it: customPrompt also drops pi's tools, rules (how to use edit) and docs (where pi's extension docs are)
+  sections, and a returned systemPrompt is built from the sections before later extensions add theirs. The
+  builder (buildSystemPromptSections) isn't exported.
+
 ## Doc/reality mismatches (pi 1.4.0)
 - A Stop during a tool call is saved as stopReason "error" ("This operation was aborted"), though StopReason has
   "aborted". Handled in the host (host.abort).
@@ -435,7 +456,6 @@ Seen, not changed:
 ## Open questions / gaps
 - "agent joined" shows one line late: pi saves the system message after the first user message.
 - pi's default prompt preamble ("expert coding assistant operating inside pi") is still in front of Chalky's.
-- Thinking level is "off": the model is set after the session is made. Set it explicitly.
 - Shared state between agents goes through `globalThis.chalky` (a convention of ours; pi extensions are per session).
 - Not ported yet:
   voice, tasks, mcp (pi has MCP). (vision: covered by pi's read.)
