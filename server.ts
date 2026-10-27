@@ -2,6 +2,7 @@
 // app/extensions/<name>/ (agents can change those; this file they can't). This file only:
 //   - runs the web server: its WebSocket /ws, and every route extensions add (the page: extensions/page);
 //   - keeps one pi AgentSession per agent (session name = agent name; saved under state/sessions/<agent>);
+//   - serves /recover: going back to a working version when an agent broke the page (the safety net);
 //   - turns pi's messages into the page's (OpenAI chat format); the page replays pi's session files (compaction
 //     keeps the original entries, so the page still shows everything).
 // Extensions reach the host through globalThis.chalky (pi loads them with jiti, so they don't share our imports).
@@ -10,6 +11,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import git from "isomorphic-git";
 import { WebSocketServer } from "ws";
 
 const ROOT = import.meta.dirname;
@@ -197,11 +199,70 @@ function file(res: http.ServerResponse, p: string) {
   fs.createReadStream(p).pipe(res);
 }
 
+// ---- recovery: the safety net for when an agent breaks the page (or the versions extension, so its panel) ----
+// Here, not in an extension, so agents can't break it too. Plain HTML forms, no script: it works whatever app/ holds.
+//   GET  /recover        the saved versions (state/versions.git, written by the versions extension), newest first;
+//                        "the page worked" = the page took its picture of that version (state/shots/<sha>.png);
+//                        the newest too (a broken versions extension doesn't save the edit that broke it)
+//   POST /recover/<sha>  that version's files back into app/, as a new commit (as the versions panel's rollback,
+//                        without its extras), then every agent's extensions load again; back to the page
+// Also shown at / when no extension serves the page (the page extension failed to load).
+const REPO = { fs, dir: APP, gitdir: path.join(STATE, "versions.git") };
+const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+
+async function recoverPage(res: http.ServerResponse) {
+  const log = fs.existsSync(REPO.gitdir) ? await git.log(REPO) : [];
+  const rows = log.map(({ oid, commit: c }, i) => `<tr><td>${new Date(c.author.timestamp * 1000).toLocaleString()}</td>
+    <td>${esc(c.author.name)}</td><td>${esc(c.message.split("\n")[0])}</td>
+    <td>${fs.existsSync(path.join(STATE, "shots", `${oid}.png`)) ? "the page worked" : ""}</td>
+    <td><form method="post" action="/recover/${oid}"><button>go back to this</button></form>${i ? "" : " (the last saved)"}</td></tr>`);
+  const failed = host.agents.get("agent1")?.session.resourceLoader.getExtensions().errors ?? [];  // what didn't load
+  res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(`<!doctype html><title>Recover</title>
+<style>body{font:14px system-ui;margin:2em}td{padding:4px 10px;border-bottom:1px solid #ddd}</style>
+<h1>Recover</h1><p>If an agent broke the page, go back to a version where it worked. Nothing is lost: the current
+files are saved first, and going back is itself a new version. <a href="/">Back to the page</a></p>
+${failed.map((e: any) => `<p style="color:#b00">Failed to load: ${esc(path.relative(APP, e.path))}: ${esc(String(e.error))}</p>`).join("")}
+<table>${rows.join("") || "<tr><td>No versions yet.</td></tr>"}</table>`);
+}
+
+async function recover(sha: string, res: http.ServerResponse) {
+  try { sha = await git.expandOid({ ...REPO, oid: sha }); } catch { return res.writeHead(404).end(); }
+  await host.shared.get("versions")?.queue;  // after the versions extension's own work
+  try { await host.api.swarm?.stop(); } catch {}  // the swarm extension may be the broken one
+  for (const name of host.agents.keys()) await host.abort(name);
+  const stage = async () => {  // git add -A (new ignored files skipped: statusMatrix misses info/exclude, see versions)
+    for (const [f, h, w, i] of await git.statusMatrix(REPO)) {
+      if ((h === 1 && w === 1 && i === 1) || (h === 0 && i === 0 && await git.isIgnored({ ...REPO, filepath: f }))) continue;
+      if (w === 0) { if (i !== 0) await git.remove({ ...REPO, filepath: f }); } else await git.add({ ...REPO, filepath: f });
+    }
+  };
+  const author = { name: "user", email: "user@chalky" };
+  const subject = `${sha.slice(0, 7)} ${(await git.readCommit({ ...REPO, oid: sha })).commit.message.split("\n")[0]}`;
+  await stage();
+  try { await git.commit({ ...REPO, message: "uncommitted changes before recovery", author, disallowEmpty: true }); } catch {}
+  await git.checkout({ ...REPO, ref: sha, noUpdateHead: true, force: true });
+  const files = (await git.statusMatrix(REPO)).filter(([, h, w, i]) => !(h === 1 && w === 1 && i === 1)).map(([f]) => f);
+  for (const f of files) for (let d = path.dirname(f); d !== "."; d = path.dirname(d)) {  // folders it emptied
+    try { fs.rmdirSync(path.join(APP, d)); } catch { break; }
+  }
+  await git.commit({ ...REPO, message: `recover to ${subject}`, author });
+  for (const name of host.agents.keys()) await host.reloadAgent(name);
+  if (files.includes("ui/surfaces.json")) host.shared.get("ui")?.load?.();
+  for (const name of host.agents.keys())
+    host.api.swarm?.fyi("system", name, `The user recovered ${APP} to version ${subject} (the page was broken). `
+      + `Later changes are undone (still in the history: GET http://127.0.0.1:3000/versions). Check before relying on them.`);
+  console.log(`recovered to ${subject}`);
+  res.writeHead(303, { location: "/" }).end();
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url!, "http://x").pathname;
+  if (url === "/recover") return void recoverPage(res);
+  if (url.startsWith("/recover/") && req.method === "POST") return void recover(url.slice(9), res);
   let route = host.routes.get(url);
   for (let p = url; !route && p.lastIndexOf("/") > 0; route = host.routes.get(p + "/")) p = p.slice(0, p.lastIndexOf("/"));
   if (route) return route(req, res);
+  if (url === "/") return void recoverPage(res);  // nothing serves the page: an extension broke
   res.writeHead(404).end();
 });
 
@@ -231,4 +292,4 @@ for (const name of fs.readdirSync(path.join(STATE, "sessions")).filter((n) => n 
   await host.createAgent(name, role, app);
 }
 const hostName = process.env.UI_HOST || "127.0.0.1";
-server.listen(3000, hostName, () => console.log(`chalky (pi) on http://${hostName}:3000`));
+server.listen(3000, hostName, () => console.log(`chalky (pi) on http://${hostName}:3000   (if the page breaks: http://${hostName}:3000/recover)`));

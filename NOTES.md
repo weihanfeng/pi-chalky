@@ -4,7 +4,8 @@ Question: can the Chalky agent run on pi, with plugins as native pi extensions, 
 
 ## Layout
 - `server.ts`: the host, the fixed core agents can't edit: one pi `AgentSession` per agent, the WebSocket `/ws`, route
-  lookup for what extensions add, pi messages translated to the page's (OpenAI chat format). Serves no page itself.
+  lookup for what extensions add, pi messages translated to the page's (OpenAI chat format), and `/recover` (the
+  safety net). Serves no page itself.
 - `app/`: agent-editable, versioned, and pi's agentDir. Everything is an extension, and one extension is one folder,
   `app/extensions/<name>/`: `index.ts` (pi loads it), and as needed `guide.md` (prompt text), `browser.js` (its part
   of the page), `skills/` (given to pi with `resources_discover`), other files (`ui/components/`, `page/page.html`).
@@ -370,6 +371,31 @@ Seen, not changed:
 - Not re-run this round (code unchanged since they were tested): spawn_agent, reset/app_reset, point_combine
   (drag a surface onto another), Alt-drag history scrub, the frames eraser (doodle not ported).
 
+## Recovery, the safety net (2026-10-27)
+- Python's start.sh restarted the agent and, if a start crashed within 20 s, went back to git tag "last-good".
+  Not needed here: pi skips an extension that fails to load (and reports it), and the host catches the errors
+  nothing handled, so the server keeps running.
+- What was missing: an agent breaks the page (the page extension, page.html, a browser.js) or the versions
+  extension, and the user loses the Versions panel, the only way back.
+- Fix, in server.ts (the fixed core, so agents can't break it too): `GET /recover`, plain HTML forms, no script.
+  It lists the versions (state/versions.git); "the page worked" = the page took its picture of that version; every
+  row has "go back to this", the newest too (a broken versions extension doesn't save the edit that broke it).
+  `POST /recover/<sha>`: stop the agents, save the current files ("uncommitted changes before recovery"), put that
+  version's files back, commit "recover to ...", reload every agent, then a 303 redirect back to the page. It lists
+  what failed to load (agent1's extension errors).
+- When it shows: at `/` by itself when no extension serves the page (the page extension failed); otherwise the user
+  goes to /recover (the server prints it at start). A page that loads but has a script error can't be detected by
+  the server (only the browser sees it), so no automatic rollback: the user sees a broken page better than the
+  server does.
+- The rollback steps are now in two places (versions extension and server.ts, ~30 lines): accepted for a safety net.
+- Tested: a syntax error in page/index.ts + restart: `/` showed the recovery page with the error; going back fixed
+  the file and the page came back without a restart (the reload loads the page extension again). A broken
+  versions extension: /versions 404, /recover still listed versions, going back fixed it. A syntax error in
+  page.html's script, in headless Chrome: the page blank; /recover, a real click on the button, back on a working
+  page (surfaces, palette, panels).
+- Note: a broken extension's old routes stay after a reload (host.routes isn't cleared), so the page breaks only
+  at the next start. Then /recover.
+
 ## Doc/reality mismatches (pi 1.4.0)
 - A Stop during a tool call is saved as stopReason "error" ("This operation was aborted"), though StopReason has
   "aborted". Handled in the host (host.abort).
@@ -387,7 +413,7 @@ Seen, not changed:
 - Shared state between agents goes through `globalThis.chalky` (a convention of ours; pi extensions are per session).
 - Not ported yet:
   doodle, screen, voice, tasks, mcp (pi has
-  MCP), start.sh rollback. (vision: covered by pi's read.)
+  MCP). (vision: covered by pi's read.)
 - `npm audit`: 1 high + 1 moderate, both undici 8.10.2 inside pi 1.4.0 (EventSource memory DoS, SRI bypass,
   content-encoding DoS). npm's only "fix" is downgrading pi to 0.75.3, so not applied; wait for a pi release.
   The viewer libraries add none.
