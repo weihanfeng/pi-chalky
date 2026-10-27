@@ -315,6 +315,26 @@ Pattern (same as ui): an extension registers its tool(s), its routes and page sc
 - Not done: pi-message -> page translation still in server.ts (belongs to the page extension; a later step).
   The broken-page risk (an agent breaks the page, so the Versions panel too): later, with start.sh recovery.
 
+## Frames (2026-10-27)
+- What: the user drags boxes on the main space, writes in each what goes there, presses Implement; all go to one
+  agent as one message; a frame is done (its dashed box goes) when a surface with its id appears.
+- `extensions/frames/`: index.ts (port of frames.py: GET /frames, page messages frame_add/place/text/remove,
+  frames_send, event "frames", state/frames.json), browser.js (frames.js unchanged but its header), guide.md.
+  The page found browser.js by itself: nothing registered.
+- New general hook, the pi side of Python's "ui_changed": `host.api.ui.watch(name, fn(surface, by, what))` in the
+  ui extension. Watchers are kept on the host by name (a reload replaces its own; a throwing one is reported, the
+  rest still run); registered from session_start (pi's load order). ui_history now uses it too (was a direct call).
+- Guide changes (Python's text otherwise): no task board yet (tasks not ported), so helpers get their frame by
+  tell; "the page's own code" = page.html and the browser.js files; ui-check finds its own browser.
+- Bug from the restructure, found here: `host.catalog()` -> `catalog()` made `const catalog = catalog()` (use
+  before init): every ui tool failed. The function is `readCatalog()` now. The restructure tests didn't call a
+  ui tool; this one did.
+- Tested: add/text/move/remove through page messages; Implement -> agent1 rendered frame-3 at the frame's place
+  -> frame gone, history step "agent1 drew frame-3"; headless page: Frames and Implement in the palette, the tool
+  turns on, the counter drawn. Test counter closed afterwards.
+- Seen: editing app/ while the server runs puts those edits in the agents' version history under the next
+  agent's turn (its message). Harmless; stop the server, or expect it.
+
 ## Doc/reality mismatches (pi 1.4.0)
 - `examples/extensions/reload-runtime.ts`: `pi.sendUserMessage("/reload-runtime", {deliverAs: "followUp"})` reaches
   the model as text (`expandPromptTemplates` defaults to false), so the command never runs. With our reload tool the
@@ -329,7 +349,7 @@ Pattern (same as ui): an extension registers its tool(s), its routes and page sc
 - Thinking level is "off": the model is set after the session is made. Set it explicitly.
 - Shared state between agents goes through `globalThis.chalky` (a convention of ours; pi extensions are per session).
 - Not ported yet:
-  frames, doodle, screen, voice, tasks, mcp (pi has
+  doodle, screen, voice, tasks, mcp (pi has
   MCP), start.sh rollback. (vision: covered by pi's read.)
 - `npm audit`: 1 high + 1 moderate, both undici 8.10.2 inside pi 1.4.0 (EventSource memory DoS, SRI bypass,
   content-encoding DoS). npm's only "fix" is downgrading pi to 0.75.3, so not applied; wait for a pi release.

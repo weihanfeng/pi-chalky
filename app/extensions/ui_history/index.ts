@@ -8,10 +8,10 @@
 //   GET /ui-api/history: {"at", "line": [{"n", "ts", "by", "what"}]}, the current line (root to newest tip)
 // Kept in state/ui-history.jsonl (one step per line), for HISTORY_KEEP_DAYS (default 7). Older steps are dropped at
 // start and every PRUNE_EVERY steps; the current step is always kept.
-// Undo puts back the surfaces only: code (components, apps) has its own history (the versions plugin, not ported).
+// Undo puts back the surfaces only: code (components, apps) has its own history (the versions extension).
 // pi has no undo for this: /tree and /fork rewind one agent's conversation, not the shared page.
-// ui/index.ts reaches it as host.api.uiHistory (not pi.events: each agent has its own bus, and a reload keeps the old
-// listeners on it, so every change would be recorded again for each reload).
+// It watches the ui extension's changes (host.api.ui.watch); others reach it as host.api.uiHistory. Not pi.events:
+// each agent has its own bus, and a reload keeps the old listeners on it, so every change would be recorded again.
 import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -89,6 +89,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", () => {
     if (!host.shared.has("ui-history")) host.shared.set("ui-history", new History(host.shared.get("ui")));
     host.api.uiHistory = host.shared.get("ui-history");
+    host.api.ui?.watch("ui_history", (_sid: string, by?: string, what?: string) => { if (what) host.api.uiHistory.add(by, what); });
   });
   const shared = (): History | undefined => host.shared.get("ui-history");
 

@@ -1,8 +1,11 @@
 // UI surfaces from the page's components (port of the Python ui plugin; browser.js, the page side, is its ui.js).
 // Tools ui_catalog, ui_render, ui_update, ui_delete; the guide (guide.md, copied from ui.py) as a prompt section.
 // The surfaces are shared by every agent: one Surfaces object on the host, made by whichever agent loads first.
-// One door: every change goes through change(): it saves, tells every open page, and gives the history (ui_history/,
-// as host.api.uiHistory) a step: who did it and the words for it ("you moved s1"). restore() puts back a saved state.
+// One door: every change goes through change(): it saves, tells every open page, and calls every watcher with the
+// surface, who did it and the words for it ("you moved s1"; none: part of a bigger change). restore() puts back a
+// saved state (not a change: no watchers). Watchers (Python: the "ui_changed" event), registered from session_start:
+//   host.api.ui.watch(name, fn(surface, by, what))   name: the extension's, so its reload replaces its own
+// (ui_history: a step per change with words; frames: a frame is done when its surface appears).
 //   app/ui/surfaces.json  design (everything but data)      state/ui-data.json  data (what users typed)
 // In this folder: components/*.js (the catalog), agents.js and voice.js (what apps import), package.json and
 // node_modules/ (browser libraries components import), skills/ (ui-design, ui-check, agent-apps: given to pi).
@@ -36,6 +39,11 @@ function setPath(data: any, p: string, value: any) {
   data[keys.at(-1)!] = value;
 }
 
+// On the host, so they outlive this file's reloads; one per watching extension
+const watchers: Map<string, (sid: string, by?: string, what?: string) => void> = host.shared.get("ui-watchers") ?? new Map();
+host.shared.set("ui-watchers", watchers);
+host.api.ui = { watch: (name: string, fn: (sid: string, by?: string, what?: string) => void) => watchers.set(name, fn) };
+
 class Surfaces {
   surfaces: Record<string, any> = read(DESIGN, {});
   constructor() {
@@ -56,7 +64,10 @@ class Surfaces {
     else this.surfaces[sid] = record;
     this.save();
     host.broadcast("ui", record === null ? { op: "delete", surface: sid } : { op: "render", surface: sid, ...record });
-    if (what) host.api.uiHistory?.add(by, what);
+    for (const [name, fn] of watchers) {
+      try { fn(sid, by, what); }
+      catch (e) { host.broadcast("error", { agent: "server", text: `ui watcher ${name}: ${e}` }); }  // one broken watcher doesn't stop the rest
+    }
   }
   load() {  // read the files again (after a rollback of the code changed surfaces.json); true if the surfaces changed
     const before = JSON.stringify(this.surfaces), design = read(DESIGN, {}), data = read(DATA, {});
@@ -92,7 +103,7 @@ if (!host.shared.has("ui")) host.shared.set("ui", new Surfaces());
 const ui: Surfaces = host.shared.get("ui");
 
 function problems(components: any[], madeFrom: string[] = []) {
-  const catalog = catalog(), ids = new Set(components.map((c) => c.id));
+  const catalog = readCatalog(), ids = new Set(components.map((c) => c.id));
   const errors = ids.has("root") ? [] : ['one component must have "id": "root"'];
   for (const c of components) {
     if (!(c.component in catalog)) { errors.push(`${c.id}: unknown component '${c.component}' (have: ${Object.keys(catalog).join(", ")})`); continue; }
@@ -108,7 +119,7 @@ function problems(components: any[], madeFrom: string[] = []) {
 }
 
 // The components (components/*.js): {name: {doc, mtime, about, problem}}; doc = the comment lines at the top
-function catalog() {
+function readCatalog() {
   const out: Record<string, any> = {};
   for (const f of fs.readdirSync(COMPONENTS).filter((f) => f.endsWith(".js")).sort()) {
     const text = fs.readFileSync(path.join(COMPONENTS, f), "utf8");
@@ -142,7 +153,7 @@ export default function (pi: ExtensionAPI) {
     name: "ui_catalog", label: "UI catalog", description: "List the UI components you can use in surfaces, with their props.",
     parameters: Type.Object({}),
     async execute() {
-      const catalog = catalog();
+      const catalog = readCatalog();
       const broken = Object.entries(catalog).filter(([, m]: any) => m.problem).map(([n, m]: any) => `${n}: ${m.problem}`);
       return result(Object.values(catalog).map((m: any) => m.doc + (m.about ? `\nabout: ${JSON.stringify(m.about)}` : "")).join("\n\n")
         + (broken.length ? `\n\nProblems:\n${broken.join("\n")}` : ""));
@@ -171,7 +182,7 @@ export default function (pi: ExtensionAPI) {
         const errors = problems(o.components, a.made_from);
         if (errors.length) return result("error: " + (o.label ? `${o.label}: ` : "") + errors.join("; "));
       }
-      const old = ui.surfaces[a.surface] ?? {}, catalog = catalog();
+      const old = ui.surfaces[a.surface] ?? {}, catalog = readCatalog();
       const first = options[0] ?? { components: a.components, data: a.data ?? {} };
       const record: any = { owner: agent, components: first.components, data: first.data, place: a.place ?? old.place ?? null,
         draggable: a.draggable ?? true, resizable: a.resizable ?? true, about: a.about ?? old.about ?? "",
@@ -214,9 +225,9 @@ export default function (pi: ExtensionAPI) {
 
   // The page side: registered once for all agents (keyed by name, so each agent's load replaces the last one)
   host.routes.set("/ui-api/catalog", (_req: any, res: any) => res.writeHead(200, { "content-type": "application/json" })
-    .end(JSON.stringify(Object.fromEntries(Object.entries(catalog()).map(([n, m]: any) => [n, m.mtime])))));
+    .end(JSON.stringify(Object.fromEntries(Object.entries(readCatalog()).map(([n, m]: any) => [n, m.mtime])))));
   host.routes.set("/ui-api/about", (_req: any, res: any) => res.writeHead(200, { "content-type": "application/json" })
-    .end(JSON.stringify(Object.fromEntries(Object.entries(catalog()).filter(([, m]: any) => m.about).map(([n, m]: any) => [n, m.about])))));
+    .end(JSON.stringify(Object.fromEntries(Object.entries(readCatalog()).filter(([, m]: any) => m.about).map(([n, m]: any) => [n, m.about])))));
   host.routes.set("/ui/", (req: any, res: any) => {
     let url = "";
     try { url = path.posix.normalize(decodeURIComponent(new URL(req.url, "http://x").pathname)); } catch {}  // bad %-escape: 404
