@@ -143,6 +143,11 @@ export default function (pi: ExtensionAPI) {
       // that commit's files into app/ and the index, removing files it doesn't have; the branch stays where it is
       await git.checkout({ ...repo, ref: sha, noUpdateHead: true, force: true });
       const files = (await git.statusMatrix(repo)).filter(([, h, w, i]) => !(h === 1 && w === 1 && i === 1)).map(([f]) => f);
+      // git keeps files, not folders: a folder whose files the rollback removed stays, empty (an extension folder
+      // without index.ts would show in the map). Remove those, up to the first one that isn't empty.
+      for (const f of files) for (let d = path.dirname(f); d !== "."; d = path.dirname(d)) {
+        try { fs.rmdirSync(path.join(host.app, d)); } catch { break; }
+      }
       await git.commit({ ...repo, message: `rollback to ${subject}`, author: who("user") });
       return files;
     });

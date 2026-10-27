@@ -113,8 +113,8 @@ export default async function (page) {
       }
     } catch (e) { console.warn("partAt:", e); }
     const file = frame ? "/app" + new URL(frame.contentWindow.location.href).pathname  // /ui/apps/x/... -> /app/ui/apps/x/...
-      : innermost ? `/app/ui/components/${names[innermost.localName] || innermost.localName}.js`
-      : "/app/plugins/chat_ui.html (the page itself)";
+      : innermost ? `/app/extensions/ui/components/${names[innermost.localName] || innermost.localName}.js`
+      : "/app/extensions/page/page.html (the page itself)";  // /app/: the code folder (the server puts in the real one)
     return {
       owner: el.closest("[data-owner]")?.dataset.owner || null,
       surface: el.closest("[data-surface]")?.dataset.surface || null,

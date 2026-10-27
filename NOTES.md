@@ -335,7 +335,44 @@ Pattern (same as ui): an extension registers its tool(s), its routes and page sc
 - Seen: editing app/ while the server runs puts those edits in the agents' version history under the next
   agent's turn (its message). Harmless; stop the server, or expect it.
 
+## Full test round (2026-10-27)
+Static: `node --check` on every file; a scan for names shadowing themselves (the catalog bug); every host member
+and host.api service used is defined; every URL the browser code calls has a route (except /voice-api/*: voice
+not ported; voice.js then falls back to the browser's speech recognition).
+Live (server, page messages, the agent, and the real page in headless Chrome with mouse/keyboard/drag input):
+- ui: a surface with a bound TextField and a Button; typing reached the data, the click reached the agent
+  ("hello Bob"); move, pin (a pinned surface refuses moves), prop (id refused), close.
+- ui_history: undo, redo, goto (field `step`), unknown steps ignored, no step for changes that change nothing.
+- point: Point tool + click on a button + note -> agent got surface/component/position, called note_done.
+- files: a real drag of a file from disk -> uploaded to drops, note box "Use qa-drop.csv here" -> the agent
+  read it with read_document. Viewer: report.docx from the panel (headings, list, merged-cell table); /viewer/shot.
+- appdata: load/save from inside the groceries app frame (agents.js), bad JSON and `..` names refused.
+- swarm: ask_agent (agent2 answered 42), tell (answer comes back to the sender), app bridge (agents.send from an
+  app -> agent2), Stop (bash `sleep 60` killed, agents idle).
+- self-edit: agent1 wrote extensions/qa_hello/index.ts (it read plugin-map first), reloaded, used the tool;
+  version message = its reload reason. Rollback -> the tool was gone.
+- versions: stray-file warning (agent moved the file to the workspace itself); Versions panel (list, picture,
+  rollback disabled for the current); restart keeps surfaces, data, history position, versions.
+- ui-check: check.mjs found the downloaded browser, screenshot, reported layout problems.
+Bugs found and fixed:
+1. point told agents `/app/ui/components/X.js` (the Python container's path; after the restructure also the
+   wrong folder) and `/app/plugins/chat_ui.html`. Now browser.js names extensions/ui/components and
+   extensions/page/page.html, and index.ts swaps /app/ for the real code folder.
+2. Stop showed "agent1 error: This operation was aborted": pi 1.4.0 recorded the stop (during a bash tool) as
+   stopReason "error", not "aborted" (its type has "aborted"; openai-completions only sets it if the model call
+   itself is aborted). New `host.abort(name)` marks the run as stopped on purpose; the swarm's stop and the
+   step limit use it; prompt() then returns "(stopped)" and shows no error.
+3. A rollback left folders it emptied (isomorphic-git removes files, not folders): an extension folder without
+   index.ts stayed (in the map, in `ls extensions`). Now emptied folders are removed after the checkout.
+Seen, not changed:
+- The page still sends {type: "viewport"}; nothing reads it now (it was for headless screenshots).
+- A turn started by a system message (the stray-file warning) gets that warning as its version message.
+- Not re-run this round (code unchanged since they were tested): spawn_agent, reset/app_reset, point_combine
+  (drag a surface onto another), Alt-drag history scrub, the frames eraser (doodle not ported).
+
 ## Doc/reality mismatches (pi 1.4.0)
+- A Stop during a tool call is saved as stopReason "error" ("This operation was aborted"), though StopReason has
+  "aborted". Handled in the host (host.abort).
 - `examples/extensions/reload-runtime.ts`: `pi.sendUserMessage("/reload-runtime", {deliverAs: "followUp"})` reaches
   the model as text (`expandPromptTemplates` defaults to false), so the command never runs. With our reload tool the
   model called it again on each "/reload": 55 rounds (~110 model calls) before the server was stopped.

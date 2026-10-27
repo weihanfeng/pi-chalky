@@ -154,7 +154,7 @@ const api = {
   async stop() {
     for (const name of Object.keys(S.inbox))
       for (const item of S.inbox[name].splice(0)) item.waiter?.resolve(`error: ${name} was stopped before replying`);
-    await Promise.all([...host.agents.values()].map((a: any) => a.session.abort()));
+    await Promise.all([...host.agents.keys()].map((n: string) => host.abort(n)));
     for (const k of Object.keys(S.waiting)) delete S.waiting[k];
     changed();
     host.broadcast("stopped", { agent: "all" });

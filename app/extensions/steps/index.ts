@@ -9,7 +9,9 @@ export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", () => { steps = 0; });  // once per input (retries and steering don't reset it)
   pi.on("turn_end", (_event, ctx) => {
     if (++steps !== MAX_STEPS) return;  // once: the stopped reply is one more turn_end
+    const host = (globalThis as any).chalky, agent = host.agents.get(pi.getSessionName());
+    if (agent) agent.stopped = true;  // on purpose: not shown as an error (host.abort can't be awaited from here)
     ctx.abort();
-    (globalThis as any).chalky.broadcast("error", { agent: pi.getSessionName(), text: `stopped after ${MAX_STEPS} steps` });
+    host.broadcast("error", { agent: pi.getSessionName(), text: `stopped after ${MAX_STEPS} steps` });
   });
 }

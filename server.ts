@@ -18,7 +18,8 @@ const STATE = path.join(ROOT, "state");                   // conversations and d
 const WORK = path.join(ROOT, "workspace");                // the agents' working folder (bash runs here)
 for (const d of [STATE, WORK]) fs.mkdirSync(d, { recursive: true });
 
-type Agent = { name: string; role: string; app?: string; session: any; joined?: boolean; unsubscribe: () => void; replyTo?: string };
+type Agent = { name: string; role: string; app?: string; session: any; joined?: boolean; unsubscribe: () => void; replyTo?: string;
+  stopped?: boolean };  // stopped: this run was stopped on purpose (host.abort)
 
 const sockets = new Set<any>();
 const host = {
@@ -55,20 +56,31 @@ const host = {
       a.session.sessionManager.appendCustomEntry("chalky.turn", { reply_to: replyTo });
       a.replyTo = replyTo;  // for the user message this run starts with
     }
+    a.stopped = false;
     try {
       await a.session.prompt(input);
       const last = [...a.session.messages].reverse().find((m: any) => m.role === "assistant");
+      if (a.stopped) return "(stopped)";  // pi 1.4.0 can record a stop as stopReason "error" ("This operation was aborted")
       if (last?.stopReason === "error") {
         emit("error", { agent: name, text: last.errorMessage });
         return `(error: ${last.errorMessage})`;
       }
       return last ? text(last.content) : "";
     } catch (e) {
+      if (a.stopped) return "(stopped)";
       emit("error", { agent: name, text: String(e) });
       return `(error: ${e})`;
     } finally {
       if (host.reloadAfterTurn.delete(name)) await host.reloadAgent(name);
     }
+  },
+
+  // Stop an agent's run on purpose (Stop, the step limit): not shown as an error
+  async abort(name: string) {
+    const a = host.agents.get(name);
+    if (!a) return;
+    a.stopped = true;
+    await a.session.abort();
   },
 
   // load an agent's extensions, skills and prompt again (pi's reload; the conversation stays)
@@ -206,7 +218,7 @@ new WebSocketServer({ server, path: "/ws" }).on("connection", (sock) => {
     if (kind === "chat") host.send("user", data.to === "main" || !host.agents.has(data.to) ? "agent1" : data.to, data.text);
     else if (kind === "stop" && host.api.swarm) await host.api.swarm.stop();
     else if (kind === "stop") {
-      for (const a of host.agents.values()) await a.session.abort();
+      for (const a of host.agents.values()) await host.abort(a.name);
       emit("stopped", { agent: "all" });
     } else for (const fn of host.pageHandlers.values()) await fn(data);
   });

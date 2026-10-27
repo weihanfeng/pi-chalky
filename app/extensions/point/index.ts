@@ -90,7 +90,7 @@ export default function (pi: ExtensionAPI) {
     const id = pin(text, to, msg);
     const lines = [`[note on the UI] ${text}`, `  id: ${id} (call note_done("${id}") when dealt with)`,
       ...([["surface", t.surface], ["component", (t.components ?? []).join(" → ")], ["element", t.element],
-           ["part", t.part && JSON.stringify(t.part)], ["at", at], ["text", t.text], ["file", t.file], ["position", pos],
+           ["part", t.part && JSON.stringify(t.part)], ["at", at], ["text", t.text], ["file", t.file?.replace(/^\/app\//, host.app + "/")], ["position", pos],
            ["area", area], ["files", msg.files?.join(", ")]] as [string, any][]).filter(([, v]) => v).map(([k, v]) => `  ${k}: ${v}`)];
     items.set(id, swarm.send("user", to, lines.join("\n")));
   });
