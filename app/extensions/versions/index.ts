@@ -5,12 +5,12 @@
 //   - When an agent's turn is over (pi's agent_settled) and app/ changed: commit, author = that agent, message =
 //     its reload reason, else what it was asked (Python: what it first said, often just "done"), else what it said.
 //     Event "version" to the pages ({agent, sha, message, files, restart: false}: they refresh what changed).
-//   - Pictures for the panel: taken by the open page itself (page/versions-shot.js, with dom-to-image-more; no
+//   - Pictures for the panel: taken by the open page itself (browser.js here, with dom-to-image-more; no
 //     headless browser), after each new version and, when a page opens, for the current version if it has none.
 //     In state/shots/<sha>.png. A version made while no page was open and changed again before one opened: none.
-//   - GET  /versions                 commits, newest first
+//   - GET  /versions                 commits, newest first ({sha, short, author, date, message, current, shot})
 //     GET  /versions/<sha>/shot      that commit's picture (404 if none; HEAD too)
-//     PUT  /versions/<sha>/shot      the page's picture (PNG, at most 10 MB; refused if it has one: the first page wins)
+//     PUT  /versions/<sha>/shot      the page's picture (PNG, at most 10 MB; {saved: false} if it has one: the first page wins)
 //     POST /versions/<sha>/rollback  that commit's files as a NEW commit (history is never rewritten, so a rollback
 //                                    can be rolled back). The Python agent restarted its process; here: stop every
 //                                    agent, put the files back, reload every agent's extensions (pi's reload), read
@@ -28,7 +28,6 @@ const host = (globalThis as any).chalky;
 const GIT_DIR = path.join(host.state, "versions.git");
 const SHOTS = path.join(host.state, "shots");
 const MAX_SHOT = 10 * 1024 * 1024;
-const PAGE = path.join(host.root, "page");  // browser files of the pi version (not the agents': outside app/)
 const CODE = ["extensions/", "skills/", "ui/"];
 const IGNORE = ["auth.json", "models-store.json", "node_modules/"];
 const repo = { fs, dir: host.app, gitdir: GIT_DIR };
@@ -104,7 +103,8 @@ export default function (pi: ExtensionAPI) {
   host.routes.set("/versions", async (_req: any, res: any) => {
     const now = await head();  // waits for queued work, so the log is complete
     const out = (await git.log(repo)).map(({ oid, commit: c }) => ({ sha: oid, short: oid.slice(0, 7), author: c.author.name,
-      date: new Date(c.author.timestamp * 1000).toISOString(), message: c.message.split("\n")[0], current: oid === now }));
+      date: new Date(c.author.timestamp * 1000).toISOString(), message: c.message.split("\n")[0], current: oid === now,
+      shot: fs.existsSync(path.join(SHOTS, `${oid}.png`)) }));  // the page takes the current one's picture if it has none
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(out));
   });
 
@@ -120,7 +120,8 @@ export default function (pi: ExtensionAPI) {
       return fs.createReadStream(shot).pipe(res.writeHead(200, { "content-type": "image/png" }));
     }
     if (what === "shot" && req.method === "PUT") {  // a page's picture of this version
-      if (fs.existsSync(shot)) return res.writeHead(409).end();  // another page was first
+      if (fs.existsSync(shot))  // another page was first: not an error (a 409 would be logged by the browser)
+        return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ saved: false }));
       const chunks: Buffer[] = [];
       let size = 0;
       req.on("data", (c: Buffer) => { size += c.length; if (size <= MAX_SHOT) chunks.push(c); });
@@ -155,10 +156,7 @@ export default function (pi: ExtensionAPI) {
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true }));
   });
 
-  host.routes.set("/versions/shot.js", (_req: any, res: any) =>
-    res.writeHead(200, { "content-type": "text/javascript" }).end(fs.readFileSync(path.join(PAGE, "versions-shot.js"))));
   host.routes.set("/versions/dom-to-image-more.js", (_req: any, res: any) =>
     res.writeHead(200, { "content-type": "text/javascript" })
       .end(fs.readFileSync(path.join(host.root, "node_modules/dom-to-image-more/dist/dom-to-image-more.min.js"))));
-  host.scripts.add("/versions/shot.js");
 }

@@ -17,7 +17,7 @@ const MAX_BYTES = 1024 * 1024;
 const json = (res: any, v: unknown, status = 200) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(v));
 
 export default function (pi: ExtensionAPI) {
-  const guide = fs.readFileSync(path.join(import.meta.dirname, "appdata.guide.md"), "utf8")
+  const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8")
     .replaceAll("/app/state/", host.state + "/").replaceAll("/app/", host.app + "/");
   pi.on("before_agent_start", (event) => { event.systemPromptOptions.sections.appdata = guide; });
 

@@ -15,7 +15,7 @@
 //   - Limits: asks + tells per user message, agents, inbox size, notes per minute, identical notes dropped, ask
 //     timeout. Asking an agent that is waiting on you is refused (use tell).
 // Shared state is plain data on the host (host.shared "swarm"); the code that acts on it is this file's newest load
-// (host.api.swarm), so an edited swarm.ts takes effect after a reload. Agents: host.agents (role, app, session).
+// (host.api.swarm), so an edited swarm/index.ts takes effect after a reload. Agents: host.agents (role, app, session).
 // Not ported: images with messages (doodle), the tasks plugin's "blocked" state.
 import fs from "node:fs";
 import path from "node:path";
@@ -29,7 +29,7 @@ const ASK_TIMEOUT = Number(process.env.SWARM_ASK_TIMEOUT || 600);   // seconds; 
 const INBOX_CAP = 50;          // items waiting for one agent
 const NOTES_PER_MINUTE = 20;   // per sender
 const APP_MESSAGES_PER_MINUTE = 30;  // from apps (the page) to agents
-const TEAM = fs.readFileSync(path.join(import.meta.dirname, "swarm.team.md"), "utf8");
+const TEAM = fs.readFileSync(path.join(import.meta.dirname, "team.md"), "utf8");
 
 type Waiter = { resolve: (answer: string) => void } | null;
 type Item = { kind: string; sender: string; text: string; chain: string[]; ts: number; waiter: Waiter };

@@ -1,5 +1,5 @@
 // Every state of the UI surfaces, kept: undo, redo and rewind for the user (port of the Python ui_history plugin; the
-// browser half, ui_history.js, is unchanged). After each change (ui.ts's change() with words for it, from the user or
+// browser half, browser.js, is its ui_history.js). After each change (ui.ts's change() with words for it, from the user or
 // an agent) it saves a step: a full copy of all surfaces, design and data. Steps form a tree: each has a parent, so
 // undoing and then doing something new starts a branch and loses nothing; redo follows the newest branch.
 //   Page messages:  ui_undo, ui_redo, ui_goto {step}
@@ -10,7 +10,7 @@
 // start and every PRUNE_EVERY steps; the current step is always kept.
 // Undo puts back the surfaces only: code (components, apps) has its own history (the versions plugin, not ported).
 // pi has no undo for this: /tree and /fork rewind one agent's conversation, not the shared page.
-// ui.ts reaches it as host.api.uiHistory (not pi.events: each agent has its own bus, and a reload keeps the old
+// ui/index.ts reaches it as host.api.uiHistory (not pi.events: each agent has its own bus, and a reload keeps the old
 // listeners on it, so every change would be recorded again for each reload).
 import fs from "node:fs";
 import path from "node:path";
@@ -84,7 +84,7 @@ class History {
 }
 
 export default function (pi: ExtensionAPI) {
-  // made once all of an agent's extensions are loaded (pi loads them in folder order, not by name, so ui.ts and its
+  // made once all of an agent's extensions are loaded (pi loads them in folder order, not by name, so ui and its
   // surfaces may come after this file); the first agent's session_start makes it, at startup, before any change
   pi.on("session_start", () => {
     if (!host.shared.has("ui-history")) host.shared.set("ui-history", new History(host.shared.get("ui")));
@@ -105,7 +105,4 @@ export default function (pi: ExtensionAPI) {
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ at: history?.at ?? null,
       line: (history?.line() ?? []).map((n) => { const { surfaces, parent, ...s } = history!.steps.get(n)!; return s; }) }));
   });
-  host.routes.set("/ui-api/history.js", (_req: any, res: any) =>
-    res.writeHead(200, { "content-type": "text/javascript" }).end(fs.readFileSync(path.join(host.root, "../chalky-agent/plugins/ui_history.js"))));
-  host.scripts.add("/ui-api/history.js");
 }

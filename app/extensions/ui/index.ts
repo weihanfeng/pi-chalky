@@ -1,10 +1,15 @@
-// UI surfaces from the page's components (port of the Python ui plugin; the browser half, ui.js, is unchanged).
-// Tools ui_catalog, ui_render, ui_update, ui_delete; the guide (ui.guide.md, copied from ui.py) as a prompt section.
+// UI surfaces from the page's components (port of the Python ui plugin; browser.js, the page side, is its ui.js).
+// Tools ui_catalog, ui_render, ui_update, ui_delete; the guide (guide.md, copied from ui.py) as a prompt section.
 // The surfaces are shared by every agent: one Surfaces object on the host, made by whichever agent loads first.
-// One door: every change goes through change(): it saves, tells every open page, and gives the history (ui_history.ts,
+// One door: every change goes through change(): it saves, tells every open page, and gives the history (ui_history/,
 // as host.api.uiHistory) a step: who did it and the words for it ("you moved s1"). restore() puts back a saved state.
 //   app/ui/surfaces.json  design (everything but data)      state/ui-data.json  data (what users typed)
-// App messages and app_reset: swarm.ts.
+// In this folder: components/*.js (the catalog), agents.js and voice.js (what apps import), package.json and
+// node_modules/ (browser libraries components import), skills/ (ui-design, ui-check, agent-apps: given to pi).
+//   GET /ui/apps/<name>/...  an app (app/ui/apps: what the agents built)
+//   GET /ui/components/..., /ui/agents.js, /ui/voice.js, /ui/node_modules/...  from this folder
+//   GET /ui-api/catalog (name -> mtime), /ui-api/about (name -> about block), /ui-api/surfaces
+// App messages and app_reset: swarm/.
 import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -12,6 +17,9 @@ import { Type } from "typebox";
 
 const host = (globalThis as any).chalky;
 const DESIGN = path.join(host.app, "ui/surfaces.json");
+const APPS = path.join(host.app, "ui/apps");
+const COMPONENTS = path.join(import.meta.dirname, "components");
+const SERVED = ["components/", "agents.js", "voice.js", "node_modules/"];  // what /ui/ serves from this folder
 const DATA = path.join(host.state, "ui-data.json");
 const read = (p: string, d: any) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : d);
 const clone = (v: any) => structuredClone(v);
@@ -84,7 +92,7 @@ if (!host.shared.has("ui")) host.shared.set("ui", new Surfaces());
 const ui: Surfaces = host.shared.get("ui");
 
 function problems(components: any[], madeFrom: string[] = []) {
-  const catalog = host.catalog(), ids = new Set(components.map((c) => c.id));
+  const catalog = catalog(), ids = new Set(components.map((c) => c.id));
   const errors = ids.has("root") ? [] : ['one component must have "id": "root"'];
   for (const c of components) {
     if (!(c.component in catalog)) { errors.push(`${c.id}: unknown component '${c.component}' (have: ${Object.keys(catalog).join(", ")})`); continue; }
@@ -99,20 +107,42 @@ function problems(components: any[], madeFrom: string[] = []) {
   return [...errors, ...madeFrom.filter((m) => !(m in ui.surfaces)).map((m) => `made_from: no surface '${m}'`)];
 }
 
+// The components (components/*.js): {name: {doc, mtime, about, problem}}; doc = the comment lines at the top
+function catalog() {
+  const out: Record<string, any> = {};
+  for (const f of fs.readdirSync(COMPONENTS).filter((f) => f.endsWith(".js")).sort()) {
+    const text = fs.readFileSync(path.join(COMPONENTS, f), "utf8");
+    const doc: string[] = [];
+    for (const line of text.split("\n")) {
+      if (!line.startsWith("//")) break;
+      doc.push(line.slice(2).trim());
+    }
+    let about = null, problem = null;
+    const i = text.indexOf("export const about = ");
+    if (i >= 0) {
+      try { about = JSON.parse(text.slice(i + 21, text.indexOf("};", i) + 1)); }
+      catch (e) { problem = `its about block is not valid JSON (${e})`; }
+    }
+    out[f.slice(0, -3)] = { doc: doc.join("\n"), mtime: Math.floor(fs.statSync(path.join(COMPONENTS, f)).mtimeMs / 1000), about, problem };
+  }
+  return out;
+}
+
 const result = (text: string) => ({ content: [{ type: "text" as const, text }], details: undefined });
 const Place = Type.Optional(Type.Object({ x: Type.Number(), y: Type.Number(), width: Type.Optional(Type.Number()), height: Type.Optional(Type.Number()) },
   { description: "pin it at a spot (px from the main space's top-left); leave out to stack it" }));
 
 export default function (pi: ExtensionAPI) {
-  const guide = fs.readFileSync(path.join(import.meta.dirname, "ui.guide.md"), "utf8")
+  const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8")
     .replaceAll("/app/state/", host.state + "/").replaceAll("/app/", host.app + "/");
   pi.on("before_agent_start", (event) => { event.systemPromptOptions.sections.ui = guide; });
+  pi.on("resources_discover", () => ({ skillPaths: [path.join(import.meta.dirname, "skills")] }));
 
   pi.registerTool({
     name: "ui_catalog", label: "UI catalog", description: "List the UI components you can use in surfaces, with their props.",
     parameters: Type.Object({}),
     async execute() {
-      const catalog = host.catalog();
+      const catalog = catalog();
       const broken = Object.entries(catalog).filter(([, m]: any) => m.problem).map(([n, m]: any) => `${n}: ${m.problem}`);
       return result(Object.values(catalog).map((m: any) => m.doc + (m.about ? `\nabout: ${JSON.stringify(m.about)}` : "")).join("\n\n")
         + (broken.length ? `\n\nProblems:\n${broken.join("\n")}` : ""));
@@ -141,7 +171,7 @@ export default function (pi: ExtensionAPI) {
         const errors = problems(o.components, a.made_from);
         if (errors.length) return result("error: " + (o.label ? `${o.label}: ` : "") + errors.join("; "));
       }
-      const old = ui.surfaces[a.surface] ?? {}, catalog = host.catalog();
+      const old = ui.surfaces[a.surface] ?? {}, catalog = catalog();
       const first = options[0] ?? { components: a.components, data: a.data ?? {} };
       const record: any = { owner: agent, components: first.components, data: first.data, place: a.place ?? old.place ?? null,
         draggable: a.draggable ?? true, resizable: a.resizable ?? true, about: a.about ?? old.about ?? "",
@@ -183,10 +213,20 @@ export default function (pi: ExtensionAPI) {
   });
 
   // The page side: registered once for all agents (keyed by name, so each agent's load replaces the last one)
+  host.routes.set("/ui-api/catalog", (_req: any, res: any) => res.writeHead(200, { "content-type": "application/json" })
+    .end(JSON.stringify(Object.fromEntries(Object.entries(catalog()).map(([n, m]: any) => [n, m.mtime])))));
+  host.routes.set("/ui-api/about", (_req: any, res: any) => res.writeHead(200, { "content-type": "application/json" })
+    .end(JSON.stringify(Object.fromEntries(Object.entries(catalog()).filter(([, m]: any) => m.about).map(([n, m]: any) => [n, m.about])))));
+  host.routes.set("/ui/", (req: any, res: any) => {
+    let url = "";
+    try { url = path.posix.normalize(decodeURIComponent(new URL(req.url, "http://x").pathname)); } catch {}  // bad %-escape: 404
+    if (!url.startsWith("/ui/")) return res.writeHead(404).end();  // also a ".." out of /ui/
+    const p = url.slice("/ui/".length);
+    if (p.startsWith("apps/")) return host.file(res, path.join(APPS, p.slice("apps/".length)));
+    if (!SERVED.some((s) => p === s || (s.endsWith("/") && p.startsWith(s)))) return res.writeHead(404).end();
+    host.file(res, path.join(import.meta.dirname, p));
+  });
   host.routes.set("/ui-api/surfaces", (_req: any, res: any) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(ui.surfaces)));
-  host.routes.set("/ui-api/renderer.js", (_req: any, res: any) =>
-    res.writeHead(200, { "content-type": "text/javascript" }).end(fs.readFileSync(path.join(host.root, "../chalky-agent/plugins/ui.js"))));
-  host.scripts.add("/ui-api/renderer.js");
   host.pageHandlers.set("ui", (msg: any) => {
     const { type, surface: sid } = msg;
     const r = typeof sid === "string" ? ui.get(sid) : undefined;

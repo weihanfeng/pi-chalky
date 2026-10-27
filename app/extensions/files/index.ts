@@ -1,13 +1,13 @@
 // Files: the user's files, in one folder, <workspace>/drops (port of the Python files plugin; the browser half,
-// files.js, is unchanged). files.js shows them in a panel on the page's right edge and handles files dragged onto
-// the page (from the computer: uploaded here, listed, and a "files-dropped" DOM event so point.js opens its note
+// browser.js, is its files.js). browser.js shows them in a panel on the page's right edge and handles files dragged onto
+// the page (from the computer: uploaded here, listed, and a "files-dropped" DOM event so point's browser.js opens its note
 // box there; onto the panel itself: only stored; a row from the panel: the same event with that file).
 // The agent always knows the folder (its prompt section); files it saves there show in the panel too (the list is
 // sent again when an agent's turn is over: pi's agent_settled).
 //   POST /files/upload?name=<file name>  the file's bytes: saved in DIR (a safe, new name), returns {path, size}
 //   GET  /files                          [{name, path, size}], newest first; files in folders too ("q3/costs.xlsx")
 //   event "files" {files: [...]}         to every open page, when the list changed
-// The guide (files.guide.md, copied from files.py) names pi's read tool for pictures (the Python agent: view_image).
+// The guide (guide.md, copied from files.py) names pi's read tool for pictures (the Python agent: view_image).
 import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -36,14 +36,12 @@ function changed() {  // tell the pages, if the list is not what they were last 
 }
 
 export default function (pi: ExtensionAPI) {
-  const guide = fs.readFileSync(path.join(import.meta.dirname, "files.guide.md"), "utf8")
+  const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8")
     .replace("view_image for pictures", "read shows you pictures").replaceAll("/workspace/", host.work + "/").replaceAll("/workspace.", host.work + ".");
   pi.on("before_agent_start", (event) => { event.systemPromptOptions.sections.files = guide; });
   pi.on("agent_settled", () => changed());  // the agent may have saved files there
   if (!host.shared.has("files-last")) host.shared.set("files-last", JSON.stringify(listing()));
 
-  host.routes.set("/files/files.js", (_req: any, res: any) =>
-    res.writeHead(200, { "content-type": "text/javascript" }).end(fs.readFileSync(path.join(host.root, "../chalky-agent/plugins/files.js"))));
   host.routes.set("/files", (_req: any, res: any) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(listing())));
   host.routes.set("/files/upload", (req: any, res: any) => {  // save one file in DIR (a new name if it exists)
     if (req.method !== "POST") return res.writeHead(405).end();
@@ -73,5 +71,4 @@ export default function (pi: ExtensionAPI) {
       });
     });
   });
-  host.scripts.add("/files/files.js");
 }

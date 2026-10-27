@@ -1,0 +1,615 @@
+<!doctype html>
+<!-- The page the user sees, served fresh on every load by the page extension (extensions/page/; edits show on reload).
+  Design (pivot 2026-10-14, see the Chalky repo's NOTES.md "Direction"): what the agents build fills the screen; talk is secondary.
+  Layout, every part fixed over the full window:
+    #top      main space: what the agents built (the ui plugin draws its surfaces here). Scrolls.
+    #rail     left edge: icons that open a panel; clicking the open one closes it.
+    #panel    a glass panel over the main space: #messages (the conversation) or #versions (history,
+              a screenshot of each version, rollback; the user's way to undo the agent's own changes: keep it working).
+  /?shot: the page as the versions plugin screenshots it (panels closed, nothing sent but what the page needs).
+    #working  bottom left: animated dots for each busy agent, and Stop.
+    #f        bottom centre: the instruction line (#to picks the agent, shown when there are several).
+    #status   top centre: the tool palette, a row of tools. Browser plugins add a <button> with an icon, or a
+              <details> whose <summary> is the icon and whose content pops out below.
+              A tool with sub-tools (frames' Implement) is a <span class="tool">: its button, then a
+              smaller row (.sub) that hangs directly under it, hidden while none of its buttons shows (pageApi.tool).
+    #side     right edge: empty; a browser plugin fills it (the files plugin's file panel).
+  Look: glass layers on one soft background, tokens in :root (colours, glass, blur, sizes); icons are inline
+  SVG from ICONS (data-icon="name").
+  Messages: only words are full text (the user's, and an agent's reply); everything else an agent does
+  (reasoning, tool calls, results, messages between agents) is a small icon: hover to peek, click to read.
+  App agents (status "app": part of something built, e.g. a simulation's members) stay out of the messages,
+  the picker and the working rows (one row per app): their app shows their talk.
+  Data: one WebSocket /ws. Every server event arrives as JSON {type, agent, ts, ...}; ws.onmessage handles
+  "status", "message", "version", errors. Sending: {to, text} is a message, {type: "stop"} stops all.
+  Extending without editing this file: an extension's browser.js (extensions/<name>/browser.js; GET /page/scripts lists them);
+  each script's default export gets pageApi: on(type, fn), send(obj) (-> the extensions' page handlers),
+  slot("top" | "status" | "side"), tool(button) -> the row under that palette tool (for its sub-tools), note(text), load(name), component(name, props) (components from extensions/ui/components),
+  command(name, fn, description): "/name rest" typed in the input calls fn(rest) instead of sending (other "/..." text
+  is sent); typing "/" lists the commands above the input, narrowing as you type.
+  provide(name, obj) / use(name) -> promise of obj: what one browser plugin offers others (scripts load in any
+  order, so use waits until it's provided; the screen plugin offers "screen"). -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chalky</title>
+<!-- Libraries that components import by name (installed from extensions/ui/package.json). Must come before any module. -->
+<script type="importmap">
+{ "imports": {
+    "marked": "/ui/node_modules/marked/lib/marked.esm.js",
+    "dompurify": "/ui/node_modules/dompurify/dist/purify.es.mjs"
+} }
+</script>
+<style>
+  /* Glass: everything floats on one soft background; panels and bars are clear layers over the work,
+     told apart by blur and light, not by borders. Tune the look here. */
+  :root {
+    --text: #1d1d1f; --soft: rgba(29, 29, 31, 0.72); --muted: rgba(60, 60, 67, 0.55); --accent: #0071e3;
+    --danger: #e5484d; --line: rgba(0, 0, 0, 0.06); --hover: rgba(0, 0, 0, 0.045);
+    --glass: rgba(255, 255, 255, 0.45); --glass-strong: rgba(255, 255, 255, 0.7); --edge: rgba(255, 255, 255, 0.75);
+    --blur: saturate(170%) blur(24px); --shadow: 0 6px 28px rgba(0, 0, 0, 0.05); --radius: 16px;
+    --rail: 56px; --panel: 400px; --bar: 96px; --palette: 72px;  /* edge columns' width, panel width, bottom room, top room */
+  }
+  body { margin: 0; height: 100vh; color: var(--text); -webkit-font-smoothing: antialiased;
+         font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+         background: radial-gradient(1100px 700px at 10% 0%, #edf1fa, transparent 60%),
+                     radial-gradient(1000px 700px at 100% 100%, #f3effa, transparent 60%), #f7f7f9; }
+  [hidden] { display: none !important; }  /* hidden wins over any display rule below */
+  button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; padding: 0; }
+  svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5;
+        stroke-linecap: round; stroke-linejoin: round; display: block; }
+
+  /* ---- Main space: the agents' work, under everything else ---- */
+  #top { position: fixed; inset: 0; overflow-y: auto; box-sizing: border-box;
+         padding: var(--palette) calc(var(--rail) + 28px) var(--bar) calc(var(--rail) + 28px); }
+  #top:empty::before { content: "What should we build?"; position: absolute; inset: 0; display: grid; place-items: center;
+                       font-size: 30px; font-weight: 300; letter-spacing: -0.02em; color: rgba(0, 0, 0, 0.2); }
+
+  /* ---- Rail: an icon column on the left edge, no background of its own. Tool palette: a row of tools on
+     a glass bar, top centre. Side: the right edge, for a plugin's panel (sized by its content). ---- */
+  #rail { position: fixed; top: 0; bottom: 0; left: 0; width: var(--rail); z-index: 20; display: flex;
+          flex-direction: column; align-items: center; gap: 6px; padding-top: 16px; box-sizing: border-box; }
+  #status { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; gap: 4px;
+            padding: 4px; border-radius: 16px; background: var(--glass); backdrop-filter: var(--blur);
+            -webkit-backdrop-filter: var(--blur); border: 1px solid var(--edge); box-shadow: var(--shadow); }
+  #status:empty { display: none; }
+  #status > .tool { position: relative; }
+  #status .sub { position: absolute; top: calc(100% + 10px); left: 50%; transform: translateX(-50%); display: flex; gap: 4px;
+                 padding: 3px; border-radius: 14px; background: var(--glass); backdrop-filter: var(--blur);
+                 -webkit-backdrop-filter: var(--blur); border: 1px solid var(--edge); box-shadow: var(--shadow); }
+  #status .sub:not(:has(> :not([hidden]))) { display: none; }  /* only hidden buttons (or none): no row */
+  #status .tool .badge { top: -4px; right: -4px; }  /* on the corner, off the icon */
+  #side { position: fixed; top: 0; right: 0; z-index: 20; display: flex; flex-direction: column; align-items: flex-end; }
+  #rail button, #status > button, #status > details > summary, #status > .tool > button, #status .sub > button {
+    width: 38px; height: 38px; display: grid; place-items: center; border-radius: 12px; color: var(--muted);
+    position: relative; list-style: none; cursor: pointer; transition: background 0.15s, color 0.15s; }
+  #status > details > summary::-webkit-details-marker { display: none; }
+  #rail button:hover, #status > button:hover, #status > details > summary:hover, #status > .tool > button:hover, #status .sub > button:hover { background: var(--hover); color: var(--text); }
+  #rail button.on, #status > button.on, #status > details[open] > summary, #status > .tool > button.on, #status .sub > button.on { background: var(--glass-strong); color: var(--text);
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06), inset 0 0 0 1px var(--edge); }
+  #status > details { position: relative; }
+  #status > details > div { position: absolute; left: 50%; top: 50px; transform: translateX(-50%); width: 320px; max-height: 60vh; overflow-y: auto;
+                            padding: 12px 14px; border-radius: var(--radius); font-size: 13px; color: var(--soft);
+                            background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+                            border: 1px solid var(--edge); box-shadow: var(--shadow); }
+  .badge { position: absolute; top: 3px; right: 3px; min-width: 15px; height: 15px; border-radius: 8px; padding: 0 4px;
+           box-sizing: border-box; background: var(--accent); color: #fff; font-size: 9.5px; line-height: 15px; text-align: center; }
+  .badge:empty { display: none; }
+  .tasks .task { padding: 3px 0; } .task.done { color: #16a34a; } .task.blocked { color: var(--danger); }
+
+  /* ---- Panel: a tint over the main space that fades out to the right, so it blends into the work.
+     (No backdrop blur here: blur plus a fading edge renders as stripes.) ---- */
+  #panel { position: fixed; top: 0; bottom: 0; left: 0; width: calc(var(--rail) + var(--panel)); z-index: 10;
+           transition: opacity 0.25s ease, transform 0.25s ease;
+           background: linear-gradient(to right, rgba(247, 247, 249, 0.92) 55%, rgba(247, 247, 249, 0.6) 80%, transparent); }
+  body:not([data-panel="messages"]):not([data-panel="versions"]) #panel { opacity: 0; transform: translateX(-24px); pointer-events: none; }
+  #panel > section { position: absolute; inset: 0 0 0 var(--rail); display: none; }
+  body[data-panel="messages"] #messages, body[data-panel="versions"] #versions { display: flex; }
+
+  /* Newest at the bottom, just above the instruction line; older ones rise and grow fainter towards the top.
+     Pointing at the messages lifts the fade, to read back. */
+  #log { flex: 1; overflow-y: auto; padding: 56px 72px var(--bar) 16px; scrollbar-width: none;
+         display: flex; flex-direction: column;
+         --fade: linear-gradient(transparent, rgba(0, 0, 0, 0.25) 15%, rgba(0, 0, 0, 0.7) 35%, #000 55%);
+         mask-image: var(--fade); -webkit-mask-image: var(--fade); }
+  #log:hover { --fade: linear-gradient(transparent, #000 56px); }
+  #log > :first-child { margin-top: auto; }  /* few messages: they sit at the bottom (flex-end would break scrolling) */
+  .block { margin: 0 0 22px; animation: rise 0.4s ease-out; }
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+  .who { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; letter-spacing: 0.01em;
+         color: var(--c, var(--muted)); }
+  .who svg { width: 16px; height: 16px; }
+  .who time { margin-left: auto; font-weight: 400; color: var(--muted); opacity: 0; transition: opacity 0.2s; }
+  .block:hover .who time { opacity: 1; }
+  .text { margin: 3px 0 0 22px; color: var(--soft); white-space: pre-wrap; overflow-wrap: anywhere; letter-spacing: -0.005em; }
+  .block:not([data-who="you"]) .text { color: var(--text); }
+  .text .to { color: var(--muted); font-size: 12px; margin-right: 4px; }
+  .text > ui-markdown, .text > ui-markdown > p:first-child { display: inline; }  /* first line next to .to */
+  .steps { display: flex; flex-wrap: wrap; gap: 1px; margin: 4px 0 0 19px; }
+  .step { color: var(--muted); padding: 3px; border-radius: 6px; opacity: 0.8; }
+  .step svg { width: 14px; height: 14px; }
+  .step:hover, .step.open { background: var(--hover); color: var(--text); opacity: 1; }
+  .step.error { color: var(--danger); }
+  .detail { margin: 4px 0 0 22px; padding: 8px 10px; border-radius: 10px; color: var(--soft);
+            background: var(--glass); border: 1px solid var(--edge);
+            font: 11px/1.45 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
+            max-height: 260px; overflow-y: auto; }
+  .note { margin: 0 0 16px; text-align: center; font-size: 11px; letter-spacing: 0.01em; color: var(--muted); }
+
+  /* Versions: a scroll wheel of commits (newest at top) and a screenshot of the selected one */
+  #versions { flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 18px 72px 18px 16px; }
+  #frame { width: 280px; display: grid; place-items: center; overflow: hidden; border-radius: 12px; box-shadow: var(--shadow);
+           background: #fff; font-size: 11.5px; color: var(--muted); }  /* aspect-ratio: the window's, set in openPanel */
+  #frame > * { grid-area: 1 / 1; }  /* the screenshot covers the "no preview" text */
+  #frame img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+  #wheel { width: 100%; user-select: none; cursor: ns-resize; }
+  .v { display: flex; align-items: center; gap: 14px; padding: 3px 10px; cursor: pointer; white-space: nowrap; color: var(--soft); }
+  .v .dot { border: 1.5px solid var(--muted); border-radius: 50%; flex: none; box-sizing: border-box; }
+  .v .t { overflow: hidden; text-overflow: ellipsis; }
+  .v.sel { color: var(--text); } .v.sel .dot { background: var(--text); border-color: var(--text); }
+  #detail { font-size: 11.5px; color: var(--muted); text-align: center; min-height: 32px; }
+  #rollback { padding: 6px 16px; border-radius: 980px; font-size: 13px; color: var(--accent);
+              background: var(--glass-strong); border: 1px solid var(--edge); box-shadow: var(--shadow); }
+  #rollback:disabled { color: var(--muted); box-shadow: none; cursor: default; }
+
+  /* ---- Bottom: who is working (left) and the instruction line (centre) ---- */
+  #working { position: fixed; left: calc(var(--rail) + 16px); bottom: 26px; z-index: 30; display: flex;
+             align-items: center; gap: 10px; font-size: 12px; }
+  #busy { display: flex; flex-direction: column; gap: 4px; }
+  .busy { display: flex; align-items: center; gap: 8px; max-width: 170px; }  /* stays clear of the instruction line */
+  .busy b { color: var(--c); font-weight: 500; }
+  .busy span:last-child { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dots { display: flex; gap: 4px; }
+  .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--c); animation: pulse 1.2s infinite ease-in-out; }
+  .dots i:nth-child(2) { animation-delay: 0.15s; } .dots i:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes pulse { 0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+  #stop { color: var(--muted); } #stop:hover { color: var(--danger); }
+  #stop svg { width: 20px; height: 20px; }
+
+  /* The instruction: one line on the glass, no box; the send button is a clear bead */
+  #f { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 30; width: min(720px, 64vw);
+       display: flex; align-items: center; gap: 8px; padding: 2px 0 6px; border-bottom: 1px solid rgba(0, 0, 0, 0.16); }
+  #f:focus-within { border-bottom-color: rgba(0, 0, 0, 0.4); }
+  #to { border: 0; background: none; font: inherit; font-size: 12px; color: var(--muted); }
+  #text { flex: 1; border: 0; outline: none; background: none; font: inherit; font-size: 16.5px; color: var(--text); padding: 4px 0; }
+  #text::placeholder { color: var(--muted); }
+  /* Slash commands: the list above the input while a command's name is typed */
+  #cmds { position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); padding: 4px; border-radius: var(--radius);
+          background: var(--glass); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+          border: 1px solid var(--edge); box-shadow: var(--shadow); font-size: 14px; }
+  #cmds > div { display: flex; gap: 12px; padding: 6px 10px; border-radius: 10px; cursor: pointer; }
+  #cmds > div.on { background: var(--glass-strong); }
+  #cmds span { color: var(--muted); }
+  #f button { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; color: var(--text);
+              background: var(--glass); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+              border: 1px solid var(--edge); box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06); transition: background 0.15s; }
+  #f button:hover { background: var(--glass-strong); }
+  #f button svg { width: 15px; height: 15px; stroke-width: 2; }
+</style>
+<body data-panel="messages">
+<div id="top"></div>
+<nav id="rail">
+  <button id="show-messages" data-icon="messages" title="Messages"><span class="badge" id="unread"></span></button>
+  <button id="show-versions" data-icon="versions" title="Versions"></button>
+</nav>
+<aside id="panel">
+  <section id="messages"><div id="log"></div></section>
+  <section id="versions">
+    <div id="frame"><span>No preview for this version</span><img id="preview" alt="The page at this version"></div>
+    <div id="wheel" title="Scroll to pick a version"></div>
+    <div id="detail"></div>
+    <button id="rollback" type="button">Roll back to this version</button>
+  </section>
+</aside>
+<div id="working" hidden><div id="busy"></div><button id="stop" data-icon="stop" title="Stop all agents"></button></div>
+<form id="f">
+  <div id="cmds" hidden></div>
+  <select id="to" title="Send to" hidden></select>
+  <input id="text" placeholder="Tell the agents what to build or change" autocomplete="off">
+  <button data-icon="send" title="Send"></button>
+</form>
+<nav id="status"></nav>
+<aside id="side"></aside>
+<script>
+  const log = document.getElementById("log"), to = document.getElementById("to");
+  const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+  const SHOT = new URLSearchParams(location.search).has("shot");  // the versions plugin's screenshot
+  const agents = new Set();
+  const appOf = {};  // agent -> the app it is part of (from "status"): its talk is the app's, not the messages'
+  const joined = new Set();  // agents whose first system message was shown (a later one: memory cleared)
+
+  // ---- Look: line icons (24×24, drawn with the current colour). Elements with data-icon="name" get one.
+  const ICONS = {
+    messages: '<path d="M4 5h16v11H9l-5 4z"/>',
+    versions: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>',
+    robot: '<rect x="5" y="8" width="14" height="11" rx="3"/><path d="M12 5v3M9.5 13h.01M14.5 13h.01"/><circle cx="12" cy="4" r="1"/>',
+    person: '<circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/>',
+    think: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3z"/>',
+    said: '<path d="M5 7h14M5 12h14M5 17h9"/>',
+    tool: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L4 16.7 7.3 20l5.3-5.3a4 4 0 0 0 5.1-5.4l-2.4 2.4-2.6-.7-.7-2.6z"/>',
+    result: '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/>',
+    ask: '<path d="M21 3 3 10l7 3 3 7z"/><path d="m10 13 4-4"/>',
+    inbox: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="m3 7 9 6 9-6"/>',
+    stop: '<circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor"/>',
+    send: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  };
+  const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
+  for (const el of document.querySelectorAll("[data-icon]")) el.insertAdjacentHTML("afterbegin", icon(el.dataset.icon));
+
+  // Same agent name -> same colour, so parallel agents are easy to tell apart.
+  // ×137 spreads the hue, so names that differ by one character (agent1, agent2) look clearly different.
+  const colour = (a) => `hsl(${([...a].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 997, 7) * 137) % 360} 65% 45%)`;
+
+  function addAgent(a) {
+    if (agents.has(a)) return;
+    agents.add(a);
+    if (appOf[a]) return;  // app agents are reached through their app, not the instruction line
+    to.append(new Option(a, a));
+    to.hidden = to.options.length < 2;
+  }
+
+  // ---- Component runtime: the catalog of reusable UI pieces (/ui/components/<Name>.js), each a custom
+  // element <ui-name> with update(props, ui). The page draws replies with it; browser plugins use
+  // page.load / page.component (the ui plugin draws agents' surfaces from the same catalog).
+  let catalog = null;
+  const loading = {};  // name -> promise: true once <ui-name> is defined, false if there is no such component
+  const loaded = {};   // name -> version loaded (custom elements can't be redefined: changes need a reload)
+  async function fetchCatalog() {  // false: the agent didn't answer (e.g. restarting); the catalog stays as it was
+    try {
+      const r = await fetch("/ui-api/catalog");
+      if (r.ok) { catalog = await r.json(); return true; }
+    } catch {}
+    catalog ??= {};
+    return false;
+  }
+  function load(name) {
+    return loading[name] ??= (async () => {
+      if (!catalog || !(name in catalog)) await fetchCatalog();  // maybe just written
+      if (!(name in catalog)) return false;
+      const tag = `ui-${name.toLowerCase()}`;
+      if (!customElements.get(tag)) customElements.define(tag, (await import(`/ui/components/${name}.js?v=${catalog[name]}`)).default);
+      loaded[name] = catalog[name];
+      return true;
+    })().catch((e) => { delete loading[name]; throw e; });  // a broken file: try again next time
+  }
+  async function component(name, props = {}) {  // a ready element, or null if the component is missing/broken
+    try { if (!(await load(name))) return null; } catch (e) { console.warn(`component ${name}:`, e); return null; }
+    const el = document.createElement(`ui-${name.toLowerCase()}`);
+    el.update(props, { children: [], mount() {}, set() {}, action() {} });
+    return el;
+  }
+  // After an agent saves a version (end of its turn), show what it changed without a manual refresh:
+  // an App's files -> reload that App's frame; this page, a browser.js or a component in use -> reload the page
+  // (the browser can't redefine a custom element). New components need nothing: they load on first use.
+  async function refreshAfter(files) {
+    if (!(await fetchCatalog())) return reloadWhenUp();  // can't tell what changed: reload once the agent answers
+    for (const [n, p] of Object.entries(loading)) p.then((ok) => { if (!ok) delete loading[n]; });  // maybe created now
+    const changed = Object.keys(loaded).filter((n) => catalog[n] !== loaded[n]);
+    if (changed.length || files.some((f) => f === "extensions/page/page.html" || f.endsWith("/browser.js"))) return location.reload();
+    const apps = files.filter((f) => f.startsWith("ui/apps/")).map((f) => `/ui/apps/${f.split("/")[2]}/`);
+    for (const frame of document.querySelectorAll("iframe"))
+      if (apps.some((a) => new URL(frame.src, location.href).pathname.startsWith(a))) frame.contentWindow.location.reload();
+  }
+
+  // ---- Messages: blocks of consecutive messages from one speaker (an agent, or "you"). A block has a
+  // header (robot in the agent's colour, name, time), then words as text and other work as rows of icons.
+  let ts = null;  // time of the event being shown (set per event)
+  let unread = 0;  // replies that arrived while the messages panel was closed
+  function follow(change) {  // make a change to the log; stay at the bottom if the user was there
+    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+    change();
+    if (atBottom) log.scrollTop = log.scrollHeight;
+  }
+
+  function block(who) {
+    const last = log.lastElementChild;
+    if (last?.dataset.who === who) return last;
+    const b = document.createElement("div");
+    b.className = "block";
+    b.dataset.who = who;
+    if (who !== "you") b.style.setProperty("--c", colour(who));
+    b.innerHTML = `<div class="who">${icon(who === "you" ? "person" : "robot")}<span></span><time></time></div>`;
+    b.querySelector("span").textContent = who;
+    b.querySelector("time").textContent = new Date((ts || Date.now() / 1000) * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    log.append(b);
+    return b;
+  }
+
+  function text(who, words, toWhom) {  // full text: the user's words, or an agent's reply (Markdown)
+    const div = document.createElement("div");
+    div.className = "text";
+    if (toWhom) div.append(Object.assign(document.createElement("span"), { className: "to", textContent: `→ ${toWhom}` }));
+    const span = document.createElement("span");  // plain at once; swapped for the Markdown component when ready
+    span.textContent = words;
+    div.append(span);
+    follow(() => block(who).append(div));
+    component("Markdown", { text: words }).then((el) => el && follow(() => span.replaceWith(el)));
+    if (who !== "you" && document.body.dataset.panel !== "messages")
+      document.getElementById("unread").textContent = ++unread;
+  }
+
+  function step(agent, kind, title, content, error = false) {  // one icon in the agent's row; click to read it
+    follow(() => {
+      const b = block(agent);
+      let row = b.lastElementChild;
+      if (row.classList.contains("detail")) row = row.previousElementSibling;  // the row whose step is open
+      if (!row.classList.contains("steps")) b.append((row = Object.assign(document.createElement("div"), { className: "steps" })));
+      const btn = document.createElement("button");
+      btn.className = "step" + (error ? " error" : "");
+      btn.innerHTML = icon(kind);
+      btn.title = `${title}\n${content.slice(0, 200)}`;
+      btn.onclick = () => {  // one open detail per row, right under it
+        const wasOpen = btn.classList.contains("open");
+        for (const s of row.querySelectorAll(".open")) s.classList.remove("open");
+        let detail = row.nextElementSibling;
+        if (!detail?.classList.contains("detail")) row.after((detail = Object.assign(document.createElement("pre"), { className: "detail" })));
+        detail.hidden = wasOpen;
+        if (wasOpen) return;
+        btn.classList.add("open");
+        detail.textContent = `${title}\n\n${content}`;
+      };
+      row.append(btn);
+    });
+  }
+
+  function note(words) {  // a quiet line: joined, saved a version, errors, ...
+    follow(() => log.append(Object.assign(document.createElement("div"), { className: "note", textContent: words })));
+  }
+
+  // ---- Working: animated dots for each agent that isn't idle (from "status" events), Stop beside them
+  // An app's agents share one row ("board · 3 working"): the app shows what each of them does.
+  function renderWorking(list) {
+    const busy = document.getElementById("busy"), apps = {};
+    busy.innerHTML = "";
+    const row = (name, text, title) => {
+      const r = document.createElement("div");
+      r.className = "busy";
+      r.style.setProperty("--c", colour(name));
+      r.title = title;
+      r.innerHTML = `<span class="dots"><i></i><i></i><i></i></span><b></b><span></span>`;
+      r.children[1].textContent = name;
+      r.children[2].textContent = text;
+      busy.append(r);
+    };
+    for (const [a, s] of Object.entries(list)) {
+      appOf[a] = s.app;
+      addAgent(a);
+      if (s.state === "idle") continue;
+      if (s.app) apps[s.app] = (apps[s.app] || 0) + 1;
+      else row(a, (s.doing || s.state) + (s.queued ? ` · ${s.queued} queued` : ""), s.role);
+    }
+    for (const [app, n] of Object.entries(apps)) row(app, `${n} working`, `agents in the app ${app}`);
+    document.getElementById("working").hidden = !busy.children.length;
+  }
+
+  // Browser plugins: each extension's browser.js (GET /page/scripts lists them); each script's
+  // default export is called with this API.
+  const listeners = {};
+  const commands = Object.create(null);  // "/name" typed in the input -> {fn(rest of the line), description}
+  const offered = {}, wanted = {};        // provide/use: name -> obj; name -> [resolve] until it's provided
+  const pageApi = {
+    on: (type, fn) => (listeners[type] ??= []).push(fn),  // receive server events of this type
+    send: (obj) => ws.send(JSON.stringify(obj)),          // arrives at the extensions' page handlers
+    slot: (id) => document.getElementById(id),  // "top": the main space; "status": the tool palette (top); "side": right edge
+    note,       // note(text): a quiet line in the messages
+    load,       // load(name): define component <ui-name>; resolves false if there is no such component
+    component,  // component(name, props): a ready element, or null
+    command: (name, fn, description = "") => { commands[name] = { fn, description }; },
+    provide: (name, obj) => { offered[name] = obj; for (const ok of wanted[name] || []) ok(obj); delete wanted[name]; },
+    use: (name) => name in offered ? Promise.resolve(offered[name]) : new Promise((ok) => (wanted[name] ??= []).push(ok)),
+    tool: (button) => {  // puts button in the palette with a row under it; returns the row, for its sub-tools
+      const sub = Object.assign(document.createElement("div"), { className: "sub" });
+      const wrap = Object.assign(document.createElement("span"), { className: "tool" });
+      wrap.append(button, sub);
+      document.getElementById("status").append(wrap);
+      return sub;
+    },
+  };
+  fetch("/page/scripts").then((r) => r.ok ? r.json() : []).then((urls) => {
+    for (const url of urls) import(url).then((m) => m.default(pageApi)).catch((e) => note(`plugin ${url} failed: ${e}`));
+  });
+
+  const lastFrom = {};  // agent -> who its current turn's answer goes to
+  const asked = {};     // ask_agent / tell tool-call ids
+
+  ws.onmessage = (e) => {
+    const ev = JSON.parse(e.data);
+    const a = ev.agent;
+    ts = ev.ts || null;
+    for (const fn of listeners[ev.type] || []) fn(ev);
+    if (ev.type === "status") return renderWorking(ev.agents);
+    if (ev.type === "message") {
+      addAgent(a);
+      if (appOf[a]) return;  // an app agent: its app shows its talk
+      if (ev.role === "system") {
+        const again = joined.has(a);
+        joined.add(a);
+        return note(again ? `${a} starts fresh (memory cleared)` : `${a} joined`);
+      }
+      if (ev.role === "user") {
+        // a message with pictures is a list of parts: its text, and [image <path>] for each picture
+        const content = typeof ev.content === "string" ? ev.content
+          : (ev.content || []).map((p) => p.type === "image" ? `[image ${p.file}]` : p.text).join("\n");
+        // header: "[<kind> from <name> · <time>] ..."
+        const m = /^\[(\w+) from ([^\s\]]+)[^\]]*\][^\n]*\n?/.exec(content);
+        const from = m ? m[2] : "user", words = m ? content.slice(m[0].length) : content;
+        if (ev.reply_to) lastFrom[a] = ev.reply_to;  // set on the message that starts a turn
+        // a message the page wrote for the user ("[note on the UI] <their words>" + lines for the agent):
+        // show their words; the lines meant for the agent go behind an icon
+        const tagged = from === "user" && /^\[([^\]]+)\] ?(.*)/.exec(words);
+        if (tagged) {
+          text("you", tagged[2] || tagged[1], agents.size > 1 ? a : null);
+          if (words.includes("\n")) step("you", "inbox", `${tagged[1]}: what ${a} got`, words);
+        } else if (from === "user") text("you", words, agents.size > 1 ? a : null);
+        // from another agent: already shown as its "asks"/"tells" step, or as its answer
+        else if (!agents.has(from) || from === a) step(a, "inbox", `${a} got a message from ${from}`, words);
+      }
+      if (ev.role === "assistant") {
+        if (ev.reasoning) step(a, "think", `${a} thinking`, ev.reasoning);
+        const final = !(ev.tool_calls || []).length;  // a final answer is the reply to whoever sent the message
+        const replyTo = lastFrom[a] || "user";
+        if (ev.content.trim()) {
+          if (final) text(a, ev.content.trim(), replyTo === "user" ? null : replyTo);
+          else step(a, "said", `${a} said`, ev.content.trim());
+        }
+        for (const c of ev.tool_calls || []) {
+          let args = {};
+          try { args = JSON.parse(c.function.arguments); } catch {}
+          if (c.function.name === "ask_agent") { asked[c.id] = true; step(a, "ask", `${a} asks ${args.to}`, args.text || ""); }
+          else if (c.function.name === "tell") { asked[c.id] = true; step(a, "ask", `${a} tells ${args.to}`, args.text || ""); }
+          else step(a, "tool", `${a} → ${c.function.name}`, c.function.arguments);
+        }
+      }
+      // an ask_agent result is the other agent's answer, already shown as its reply; a tell result is
+      // just "sent" (errors still shown)
+      // a result may be a list of parts (view_image): text, and [image <path>] for an image
+      const res = typeof ev.content === "string" ? ev.content
+        : (ev.content || []).map((p) => p.type === "image" ? `[image ${p.file}]` : p.text).join(" ");
+      if (ev.role === "tool" && !(asked[ev.tool_call_id] && !res.startsWith("error:")))
+        step(a, "result", `${a} ← result`, res.slice(0, 4000), res.startsWith("error"));
+    }
+    if (ev.type === "compacted") note(`${a}: history compacted (~${ev.tokens_before} → ~${ev.tokens_after} tokens)`);
+    if (ev.type === "error") note(`${a} error: ${ev.text}`);
+    if (ev.type === "stopped") note("all agents stopped");
+    if (ev.type === "version") {
+      note(`${a} saved version ${ev.sha}: ${ev.message}`);
+      // A restart (or rollback) follows: the process is going down, so asking it now fails; ws.onclose reloads.
+      if (!ev.restart) { loadVersions(); refreshAfter(ev.files || []); }
+    }
+  };
+  // Reload only once the agent answers: reloading while it is down shows the proxy's error page, which has no
+  // script to come back from.
+  let reloading = false;
+  function reloadWhenUp() {
+    if (reloading) return;
+    reloading = true;
+    const retry = () => fetch(location.pathname).then((r) => r.ok ? location.reload() : setTimeout(retry, 2000),
+                                                       () => setTimeout(retry, 2000));
+    setTimeout(retry, 2000);
+  }
+  // The agent restarts itself after editing its plugins (or a rollback): wait until it is back, then reload.
+  ws.onclose = () => {
+    note("disconnected; reconnecting…");
+    reloadWhenUp();
+  };
+
+  document.getElementById("f").onsubmit = (e) => {
+    e.preventDefault();
+    const input = document.getElementById("text");
+    const [, name, rest] = input.value.trim().match(/^\/(\S+)\s*([\s\S]*)$/) || [];
+    if (commands[name]) commands[name].fn(rest);
+    else if (input.value.trim()) ws.send(JSON.stringify({ to: to.value || "main", text: input.value }));
+    input.value = "";
+  };
+  // Slash commands: while the input is "/" plus part of a name, the matching commands show above it.
+  // ↑↓ pick one, Enter or a click runs it, Tab fills it in (to add words after it), Esc closes the list.
+  const textInput = document.getElementById("text"), cmds = document.getElementById("cmds");
+  let picked = 0;
+  const matching = () => {
+    const m = textInput.value.match(/^\/(\S*)$/);
+    return m ? Object.keys(commands).filter((n) => n.startsWith(m[1])).sort() : [];
+  };
+  function showCmds() {
+    const list = matching();
+    cmds.hidden = !list.length;
+    picked = Math.max(0, Math.min(picked, list.length - 1));
+    cmds.replaceChildren(...list.map((n, i) => {
+      const row = document.createElement("div"), name = document.createElement("b"), about = document.createElement("span");
+      row.className = i === picked ? "on" : "";
+      name.textContent = "/" + n;
+      about.textContent = commands[n].description;
+      row.append(name, about);
+      row.onmousedown = (e) => { e.preventDefault(); runCmd(n); };  // before the input loses focus
+      return row;
+    }));
+  }
+  function runCmd(n) {
+    textInput.value = "";
+    cmds.hidden = true;
+    commands[n].fn("");
+  }
+  textInput.addEventListener("input", () => { picked = 0; showCmds(); });
+  textInput.addEventListener("blur", () => { cmds.hidden = true; });
+  textInput.addEventListener("keydown", (e) => {
+    const list = cmds.hidden ? [] : matching();
+    if (!list.length) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { picked = (picked + (e.key === "ArrowDown" ? 1 : list.length - 1)) % list.length; showCmds(); }
+    else if (e.key === "Tab") { textInput.value = `/${list[picked]} `; showCmds(); }
+    else if (e.key === "Enter") runCmd(list[picked]);
+    else if (e.key === "Escape") cmds.hidden = true;
+    else return;
+    e.preventDefault();
+  });
+  document.getElementById("stop").onclick = () => ws.send(JSON.stringify({ type: "stop" }));
+
+  // ---- Panels: the rail opens one at a time (body[data-panel]); clicking the open one closes it
+  function openPanel(name) {
+    document.body.dataset.panel = name;
+    for (const p of ["messages", "versions"]) document.getElementById(`show-${p}`).classList.toggle("on", p === name);
+    if (name === "messages") { unread = 0; document.getElementById("unread").textContent = ""; log.scrollTop = log.scrollHeight; }
+    if (name === "versions") { document.getElementById("frame").style.aspectRatio = innerWidth / innerHeight; renderWheel(); }
+  }
+  for (const p of ["messages", "versions"])
+    document.getElementById(`show-${p}`).onclick = () => openPanel(document.body.dataset.panel === p ? "" : p);
+
+  // ---- Versions panel: a scroll wheel of commits (newest at top), the selected one's screenshot ----
+  const wheel = document.getElementById("wheel"), detail = document.getElementById("detail");
+  const preview = document.getElementById("preview"), rollbackBtn = document.getElementById("rollback");
+  let versions = [], sel = 0;
+  preview.onerror = () => {  // no shot: an older version, or a new one whose shot is still being taken (a few s)
+    preview.hidden = true;
+    const v = versions[sel];
+    if (v && Date.now() - new Date(v.date) < 30000) setTimeout(() => versions[sel] === v && renderWheel(), 3000);
+  };
+
+  async function loadVersions() {
+    try { versions = await (await fetch("/versions")).json(); } catch { return; }  // no versions plugin
+    sel = Math.max(0, versions.findIndex((v) => v.current));
+    renderWheel();
+  }
+
+  function renderWheel() {
+    wheel.innerHTML = "";
+    for (let d = -3; d <= 3; d++) {  // the selected version in the middle, 3 on each side
+      const v = versions[sel + d], row = document.createElement("div"), dist = Math.abs(d);
+      row.className = "v" + (d === 0 ? " sel" : "");
+      row.style.opacity = v ? 1 - dist * 0.25 : 0;
+      row.style.fontSize = 15 - dist * 2 + "px";
+      const size = 22 - dist * 4;
+      row.innerHTML = `<span class="dot" style="width:${size}px;height:${size}px"></span><span class="t"></span>`;
+      if (v) {
+        row.lastChild.textContent = (v.current ? "● " : "") + v.message;
+        row.onclick = () => select(sel + d);
+      } else row.lastChild.textContent = ".";
+      wheel.append(row);
+    }
+    const v = versions[sel];
+    if (!v) return;
+    detail.textContent = `${v.short} · ${v.author} · ${new Date(v.date).toLocaleString()}` + (v.current ? " · current" : "");
+    rollbackBtn.disabled = v.current;
+    preview.hidden = false;
+    preview.src = `/versions/${v.sha}/shot`;
+  }
+
+  function select(i) {
+    sel = Math.min(Math.max(i, 0), versions.length - 1);
+    renderWheel();
+  }
+
+  wheel.addEventListener("wheel", (e) => { e.preventDefault(); select(sel + Math.sign(e.deltaY)); }, { passive: false });
+
+  rollbackBtn.onclick = async () => {
+    const v = versions[sel];
+    if (!confirm(`Roll back to "${v.message}" (${v.short})?\n\nThe agent restarts and busy agents are interrupted. ` +
+                 `Later changes stay in the history, so you can roll forward again.`)) return;
+    note(`rolling back to ${v.short}…`);
+    await fetch(`/versions/${v.sha}/rollback`, { method: "POST" });
+  };
+
+  openPanel(SHOT ? "" : document.body.dataset.panel);
+  // The window size, for the versions plugin's screenshots (sent on connect and after a resize)
+  let resized;
+  const sendSize = () => SHOT || ws.send(JSON.stringify({ type: "viewport", width: innerWidth, height: innerHeight }));
+  ws.addEventListener("open", sendSize);
+  addEventListener("resize", () => { clearTimeout(resized); resized = setTimeout(sendSize, 1000); });
+  loadVersions();
+</script>

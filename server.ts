@@ -1,6 +1,6 @@
-// Host: the current Chalky page, unchanged (served from ../chalky-agent), over pi agent sessions.
-// Everything the agent does is a pi extension in app/extensions; this file only:
-//   - runs the web server: the page, its WebSocket /ws, and the routes and page scripts extensions add;
+// Host: the fixed core under the agents. Everything else, the page included, is a pi extension in
+// app/extensions/<name>/ (agents can change those; this file they can't). This file only:
+//   - runs the web server: its WebSocket /ws, and every route extensions add (the page: extensions/page);
 //   - keeps one pi AgentSession per agent (session name = agent name; saved under state/sessions/<agent>);
 //   - turns pi's messages into the page's (OpenAI chat format); the page replays pi's session files (compaction
 //     keeps the original entries, so the page still shows everything).
@@ -13,8 +13,7 @@ import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsMana
 import { WebSocketServer } from "ws";
 
 const ROOT = import.meta.dirname;
-const OLD = path.join(ROOT, "../chalky-agent/plugins");  // the current page and browser plugins, read as they are
-const APP = path.join(ROOT, "app");                       // agent-editable, pi's agentDir: extensions/, skills/, ui/
+const APP = path.join(ROOT, "app");                       // agent-editable, pi's agentDir: extensions/, skills/, ui/ (what they built)
 const STATE = path.join(ROOT, "state");                   // conversations and data, not code
 const WORK = path.join(ROOT, "workspace");                // the agents' working folder (bash runs here)
 for (const d of [STATE, WORK]) fs.mkdirSync(d, { recursive: true });
@@ -26,37 +25,15 @@ const host = {
   root: ROOT, app: APP, state: STATE, work: WORK,
   agents: new Map<string, Agent>(),
   routes: new Map<string, (req: http.IncomingMessage, res: http.ServerResponse) => void>(),  // path -> handler (a path ending in /: also every path under it)
-  scripts: new Set<string>(),                       // browser plugins: URLs the page imports
   pageHandlers: new Map<string, (msg: any) => void>(),  // one per extension (not per agent): key -> handler
   shared: new Map<string, any>(),                   // state extensions share across agents (e.g. the surfaces)
   reloadAfterTurn: new Set<string>(),               // agents whose extensions load again when their turn ends
   api: {} as Record<string, any>,                   // services extensions offer by name (e.g. swarm); the newest load wins
+  file,                                             // file(res, path): send a file (type from its extension; 404 if none)
 
   broadcast(type: string, data: object) {
     const text = JSON.stringify({ type, ...data });
     for (const s of sockets) s.send(text);
-  },
-
-  // The page's component catalog (as chat_ui.py): {name: {doc, mtime, about, problem}}
-  catalog() {
-    const out: Record<string, any> = {};
-    const dir = path.join(APP, "ui/components");
-    for (const f of fs.readdirSync(dir).filter((f) => f.endsWith(".js")).sort()) {
-      const text = fs.readFileSync(path.join(dir, f), "utf8");
-      const doc: string[] = [];
-      for (const line of text.split("\n")) {
-        if (!line.startsWith("//")) break;
-        doc.push(line.slice(2).trim());
-      }
-      let about = null, problem = null;
-      const i = text.indexOf("export const about = ");
-      if (i >= 0) {
-        try { about = JSON.parse(text.slice(i + 21, text.indexOf("};", i) + 1)); }
-        catch (e) { problem = `its about block is not valid JSON (${e})`; }
-      }
-      out[f.slice(0, -3)] = { doc: doc.join("\n"), mtime: Math.floor(fs.statSync(path.join(dir, f)).mtimeMs / 1000), about, problem };
-    }
-    return out;
   },
 
   // Without the swarm extension: each agent idle or working, and messages go straight to a run
@@ -109,7 +86,7 @@ const host = {
     const dir = path.join(STATE, "sessions", name);
     fs.mkdirSync(dir, { recursive: true });
     const settingsManager = SettingsManager.inMemory();
-    // agentDir = app/: pi finds app/extensions/*.ts and app/skills/* itself, again on every reload
+    // agentDir = app/: pi finds app/extensions/<name>/index.ts and app/skills/* itself, again on every reload
     const resourceLoader = new DefaultResourceLoader({ cwd: WORK, agentDir: APP, settingsManager, noContextFiles: true });
     await resourceLoader.reload();
     for (const e of resourceLoader.getExtensions().errors) console.error(`${name}: extension ${e.path} failed: ${e.error}`);
@@ -199,7 +176,7 @@ function onEvent(a: Agent, ev: any) {
     emit("compacted", { agent: a.name, tokens_before: ev.result.tokensBefore, tokens_after: ev.result.estimatedTokensAfter ?? "?" });
 }
 
-// ---- web server: the page (unchanged), /ws, the page layer's routes, and what extensions add ----
+// ---- web server: /ws, and the routes extensions add ----
 const types: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript",
   ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png" };
 function file(res: http.ServerResponse, p: string) {
@@ -207,15 +184,9 @@ function file(res: http.ServerResponse, p: string) {
   res.writeHead(200, { "content-type": types[path.extname(p)] ?? "application/octet-stream", "cache-control": "no-cache" });
   fs.createReadStream(p).pipe(res);
 }
-const json = (res: http.ServerResponse, v: unknown) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(v));
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url!, "http://x").pathname;
-  if (url === "/") return file(res, path.join(OLD, "chat_ui.html"));
-  if (url === "/page/scripts") return json(res, [...host.scripts]);
-  if (url === "/ui-api/catalog") return json(res, Object.fromEntries(Object.entries(host.catalog()).map(([n, m]) => [n, m.mtime])));
-  if (url === "/ui-api/about") return json(res, Object.fromEntries(Object.entries(host.catalog()).filter(([, m]) => m.about).map(([n, m]) => [n, m.about])));
-  if (url.startsWith("/ui/")) return file(res, path.join(APP, path.normalize(url).replace(/^\/+/, "")));
   let route = host.routes.get(url);
   for (let p = url; !route && p.lastIndexOf("/") > 0; route = host.routes.get(p + "/")) p = p.slice(0, p.lastIndexOf("/"));
   if (route) return route(req, res);

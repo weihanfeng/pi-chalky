@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import git from "isomorphic-git";
 
 const ROOT = path.resolve(import.meta.dirname, ".."), APP = path.join(ROOT, "app"), repo = { fs, dir: APP, gitdir: path.join(ROOT, "state/versions.git") };
-const planted = [path.join(APP, "ui/node_modules/zz-ignore-test/index.js"), path.join(APP, "ui/apps/groceries/node_modules/zz-ignore-test/dep.js")];
+const planted = [path.join(APP, "extensions/ui/node_modules/zz-ignore-test/index.js"), path.join(APP, "ui/apps/groceries/node_modules/zz-ignore-test/dep.js")];
 const commits = async () => (await (await fetch("http://127.0.0.1:3000/versions")).json()).length;
 const notes = () => fs.readdirSync(path.join(ROOT, "state/sessions/agent1")).filter((f) => f.endsWith(".jsonl"))
   .map((f) => (fs.readFileSync(path.join(ROOT, "state/sessions/agent1", f), "utf8").match(/aren't your code/g) ?? []).length).reduce((a, b) => a + b, 0);

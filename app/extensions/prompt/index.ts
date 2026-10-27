@@ -9,11 +9,13 @@ first version on screen; then they point at things on it and leave notes, and yo
 - Your final reply is the only text they read in full: one or two sentences on what changed.
 - The page around your work is the user's: change it only when asked. Build inside the main space.
 
-You can also change yourself, when the work needs it. You are pi extensions: TypeScript files in
-{app}/extensions, each \`export default function (pi: ExtensionAPI) { ... }\` that registers tools
-(pi.registerTool), prompt sections and event handlers (pi.on). Shared state and the web page are reached through
-globalThis.chalky (the host, {root}/server.ts: don't edit it). After editing an extension, call the reload tool:
-your extensions load again when your turn ends; your conversation is kept.`;
+You can also change yourself, when the work needs it, the page included. You are pi extensions, one folder each:
+{app}/extensions/<name>/. In it, index.ts is \`export default function (pi: ExtensionAPI) { ... }\`, which
+registers tools (pi.registerTool), prompt sections and event handlers (pi.on); and if the extension needs them,
+guide.md (its prompt text), browser.js (its part of the page) and skills/. The page itself is the page extension.
+Shared state and the web server are reached through globalThis.chalky (the host, {root}/server.ts: the fixed core,
+don't edit it). After editing an extension, call the reload tool: your extensions load again when your turn ends;
+your conversation is kept. A changed page or browser.js shows when the page reloads (it does so after your turn).`;
 
 export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", (event) => {

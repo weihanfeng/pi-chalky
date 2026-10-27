@@ -18,6 +18,9 @@ skills/<name>/    in your code folder (the one your prompt names, with extension
   references/     optional: longer docs, read only when needed
   assets/         optional: templates, data files
 ```
+A skill that only one feature needs goes in that extension's folder instead, `extensions/<name>/skills/<skill>/`
+(as `extensions/ui/skills/`), and its `index.ts` gives the folder to pi:
+`pi.on("resources_discover", () => ({ skillPaths: [path.join(import.meta.dirname, "skills")] }))`.
 
 ## SKILL.md
 ```markdown

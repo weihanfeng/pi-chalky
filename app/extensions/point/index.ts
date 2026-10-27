@@ -1,4 +1,4 @@
-// Notes on the UI (port of the Python point plugin; the browser half, point.js, is unchanged): the user points at
+// Notes on the UI (port of the Python point plugin; the browser half, browser.js, is its point.js): the user points at
 // things and writes a note there; the note and its target go to an agent, so it knows exactly what it is about.
 //   point_note     click anything on the page (or draw around an area) and write: the target is the surface,
 //                  component, element, part (partAt), its text and source file, the spot and the area.
@@ -9,7 +9,7 @@
 // and stays pinned (state/notes.json: {"last", "open": {id: note}}, redrawn after a reload) until the agent calls
 // note_done(id). The user can also close a pin (its ✕): the note is dropped, and taken out of its agent's inbox if
 // its turn hasn't started (the agent never saw it); else its agent is told (a note).
-// The guide (point.guide.md, copied from point.py) names pi's read tool for pictures (the Python agent: view_image).
+// The guide (guide.md, copied from point.py) names pi's read tool for pictures (the Python agent: view_image).
 import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -39,7 +39,7 @@ function describe(sid: string) {  // a source of a combine, for the agent: cut s
 }
 
 export default function (pi: ExtensionAPI) {
-  const guide = fs.readFileSync(path.join(import.meta.dirname, "point.guide.md"), "utf8")
+  const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8")
     .replace("view_image for pictures", "read shows you pictures").replaceAll("/workspace/", host.work + "/");
   pi.on("before_agent_start", (event) => { event.systemPromptOptions.sections.point = guide; });
 
@@ -56,10 +56,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  host.routes.set("/point/point.js", (_req: any, res: any) =>
-    res.writeHead(200, { "content-type": "text/javascript" }).end(fs.readFileSync(path.join(host.root, "../chalky-agent/plugins/point.js"))));
   host.routes.set("/point/notes", (_req: any, res: any) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(notes.open)));
-  host.scripts.add("/point/point.js");
 
   host.pageHandlers.set("point", (msg: any) => {
     const swarm = host.api.swarm;

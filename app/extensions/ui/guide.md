@@ -1,6 +1,6 @@
 # Showing UI to the user (ui plugin)
 Show forms, tables, dashboards or games as UI surfaces: cards in the page's main space, described as JSON.
-Prefer a surface over editing chat_ui.html. Aim for one screen; make it scroll only if the user asks.
+Prefer a surface over editing the page (/app/extensions/page/page.html). Aim for one screen; make it scroll only if the user asks.
 A surface shows only what you build, with no frame: when asked for a thing (a smiley, a chart), show just
 that thing. Add a background, border or Card only if the thing itself needs one. An app's page should keep
 a transparent background, so it sits on the workspace.
@@ -36,7 +36,7 @@ Before building or restyling what the user sees, load the ui-design skill (how i
 - When the user clicks a Button you get "[ui action] <name> ..." with the surface's data.
 - Voice input (dictation, meeting notes): import /ui/voice.js in the app (read its header), never the
   browser's speech API or a provider directly: it uses the sandbox's speech-to-text API, or the browser's.
-- A new component: /app/ui/components/<Name>.js. Start with a comment line "// Name: what it does" (more
+- A new component: /app/extensions/ui/components/<Name>.js. Start with a comment line "// Name: what it does" (more
   comment lines if needed), then its about block, then
   `export default class extends HTMLElement { update(props, ui) {...} }`.
   The about block of a component (strict JSON after `export const about = `):
@@ -60,8 +60,8 @@ Before building or restyling what the user sees, load the ui-design skill (how i
 - Agents inside what you build (a simulation's members, a debate, characters): load the agent-apps
   skill first. They are real agents that belong to the app, not workers helping you build it.
 - Libraries: components import them by name (import { marked } from "marked"), as mapped in the import map
-  at the top of chat_ui.html; installed ones are in /app/ui/package.json. To add one, download its ES-module
-  build into /app/ui/node_modules/<pkg>/ and add a line to the import map.
+  at the top of /app/extensions/page/page.html; installed ones are in /app/extensions/ui/package.json. To add one,
+  download its ES-module build into /app/extensions/ui/node_modules/<pkg>/ and add a line to the import map.
 - Component pitfalls (you can't see the browser, so avoid them up front):
   keep your own state in one object, this.state = {...}: fields like this.dir, this.title, this.hidden,
   this.id, this.style, this.lang are built-in HTMLElement properties and silently break;

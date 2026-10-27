@@ -1,5 +1,5 @@
 // Viewer: previews of the user's files (the ones in the files plugin's folder), in a window on the page (port of the
-// Python viewer plugin; the browser half, viewer.js, is unchanged). viewer.js opens a window when files.js fires
+// Python viewer plugin; the browser half, browser.js, is its viewer.js). browser.js opens a window when files' browser.js fires
 // "file-open"; the window lives only in that page (a note pointed at it says which file and which spot).
 // Parsing happens here, one library per format (plain previews, no LibreOffice):
 //   images, pdf                     shown by the browser itself, from /viewer/raw
@@ -45,7 +45,7 @@ function sheet(name: string, ws: XLSX.WorkSheet) {  // {name, rows, cut}: from A
   if (!ws["!ref"]) return { name, rows: [], cut: false };
   const r = XLSX.utils.decode_range(ws["!ref"]);
   const cut = r.e.r >= MAX_ROWS || r.e.c >= MAX_COLS;
-  r.s = { r: 0, c: 0 };  // viewer.js numbers rows and columns from the first one sent
+  r.s = { r: 0, c: 0 };  // browser.js numbers rows and columns from the first one sent
   r.e = { r: Math.min(r.e.r, MAX_ROWS - 1), c: Math.min(r.e.c, MAX_COLS - 1) };
   // raw: false = the cell's text as Excel shows it (number formats, dates); csv cells are already that text
   const rows = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, range: r, defval: "", raw: false, blankrows: true })
@@ -151,8 +151,6 @@ async function asText(p: string): Promise<string> {  // what read_document retur
 const json = (res: any, v: unknown, status = 200) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(v));
 
 export default function (pi: ExtensionAPI) {
-  host.routes.set("/viewer/viewer.js", (_req: any, res: any) =>
-    res.writeHead(200, { "content-type": "text/javascript" }).end(fs.readFileSync(path.join(host.root, "../chalky-agent/plugins/viewer.js"))));
 
   host.routes.set("/viewer/view", async (req: any, res: any) => {
     const p = inside(new URL(req.url, "http://x").searchParams.get("path"));
@@ -188,7 +186,6 @@ export default function (pi: ExtensionAPI) {
     });
   });
 
-  host.scripts.add("/viewer/viewer.js");
 
   pi.registerTool({
     name: "read_document", label: "Read document",
@@ -206,7 +203,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  const guide = fs.readFileSync(path.join(import.meta.dirname, "viewer.guide.md"), "utf8")
+  const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8")
     .replaceAll("/workspace/drops", DIR)
     .replace("look at it with\n  view_image (read_file", "look at it with\n  read (read_document")
     .replace("- read_file(path)", "- read_document(path)").replace(", doc, ppt, txt)", ", doc, txt)")

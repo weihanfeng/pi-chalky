@@ -3,15 +3,21 @@
 Question: can the Chalky agent run on pi, with plugins as native pi extensions, the page unchanged?
 
 ## Layout
-- `server.ts`: the host. Serves the current page as it is (`../chalky-agent/plugins/chat_ui.html`, `ui.js`), keeps one
-  pi `AgentSession` per agent, translates pi messages to the page's (OpenAI chat format).
-- `app/`: agent-editable, and pi's agentDir: pi finds `app/extensions/*.ts` and `app/skills/*` itself on every reload.
-  Extensions: model (LiteLLM as provider "chalky"), prompt, ui (surfaces), swarm, reload, steps.
-- `state/`: pi session files (`state/sessions/<agent>/*.jsonl`), ui data. `state-run1/`, `state-run2/`: earlier test runs.
+- `server.ts`: the host, the fixed core agents can't edit: one pi `AgentSession` per agent, the WebSocket `/ws`, route
+  lookup for what extensions add, pi messages translated to the page's (OpenAI chat format). Serves no page itself.
+- `app/`: agent-editable, versioned, and pi's agentDir. Everything is an extension, and one extension is one folder,
+  `app/extensions/<name>/`: `index.ts` (pi loads it), and as needed `guide.md` (prompt text), `browser.js` (its part
+  of the page), `skills/` (given to pi with `resources_discover`), other files (`ui/components/`, `page/page.html`).
+  The page itself is the `page` extension. `app/skills/`: skills about the agent as a whole (plugin-map,
+  write-skill). `app/ui/`: what the agents built (`surfaces.json`, `apps/`), gitignored.
+- `state/`: pi session files (`state/sessions/<agent>/*.jsonl`), ui data, version history. `state-run1/`,
+  `state-run2/`: earlier test runs.
 - Run: `MODEL_BASE_URL=http://127.0.0.1:4000/v1 MODEL_API_KEY=<LiteLLM key> node server.ts`, then `tests/say.mjs`.
-- Browser tests: `docker run -d --rm --name chalky-chrome --network host --entrypoint chrome-headless-shell agent-py:0.90
-  --no-sandbox --hide-scrollbars --remote-debugging-port=9333 --remote-debugging-address=127.0.0.1 about:blank`, then
-  `node tests/browse.mjs out.png '<js: body of an async function>'` (opens the page, runs the js, screenshots; CDP).
+- Browser tests: run a headless Chrome with its DevTools port, e.g. the one ui-check downloaded:
+  `~/.cache/chalky-browsers/chrome-headless-shell/linux-155.0.8059.84/chrome-headless-shell-linux64/chrome-headless-shell
+  --no-sandbox --hide-scrollbars --user-data-dir=<tmp> --remote-debugging-port=9333 --remote-debugging-address=127.0.0.1
+  about:blank` (or the agent-py:0.90 image's), then `node tests/browse.mjs out.png '<js: body of an async function>'`
+  (opens the page, runs the js, screenshots; CDP).
 
 ## Versions
 - Node 24.5.0. `@earendil-works/pi-coding-agent` 1.4.0 (pi-ai, pi-agent-core 1.4.0), `ws` 8.22.0 (exact).
@@ -262,6 +268,52 @@ Pattern (same as ui): an extension registers its tool(s), its routes and page sc
   version, bad id refused; a second upload not saved. Left: the panel asks for a new version's picture at once,
   before the page uploads it (one 404, then its own retry shows it): unchanged page, same in Python.
   Background is the body's plain colour (the page's gradient isn't drawn). extensions/hello.ts removed (user).
+
+## Its own repo (2026-10-27)
+- The folder was renamed from `chalky-agent-test` to `pi-chalky`, and `package.json`'s name with it. Git, branch
+  main; GitHub: weihanfeng/pi-chalky (private, like chalky-agent). First commit 77c0eef: 48 files.
+- Committed: server.ts, package files, NOTES.md, page/, tests/, and app/'s starting code (extensions, skills,
+  ui components, agents.js, voice.js, ui package files, apps/.keep).
+- Kept out (`.gitignore`): pi's logins (app/auth.json, app/models-store.json), state/ and state-run*/ (runtime),
+  workspace/ (test drops), node_modules/, and what agents build (app/ui/surfaces.json, app/ui/apps/*), as the
+  Python repo does. A missing surfaces.json is read as no surfaces, so a fresh install starts empty.
+- Two histories now, for different things: this repo (our code, by us) and state/versions.git (app/ as the agents
+  change it). They don't see each other: state/ is ignored here, and versions.git has its own work tree, app/.
+- The rename started fresh conversations: pi only continues a session saved from the same cwd (its
+  `findMostRecentSession` matches the session header's cwd). The old ones are still in state/sessions/.
+
+## One folder per extension (2026-10-27)
+- Why: the browser files were split between a `page/` folder and the Python repo (`../chalky-agent/plugins/`, read
+  at run time): pi-chalky didn't work cloned alone, couldn't be packaged, and Python edits changed it unnoticed.
+  The user: agents should be able to edit everything, the page too, and everything should be an extension.
+- pi (docs/extensions.md, core/extensions/loader.js): loads `extensions/*.ts|*.js` AND `extensions/<dir>/index.ts`
+  (or a package.json "pi" manifest), nothing else in a folder. So loose browser files in `extensions/` would be
+  loaded as (broken) extensions: one folder per extension avoids that. `resources_discover` returns skill folders
+  (agent-session.js runs it on startup and on reload); this is pi's package layout too (docs/packages.md).
+- Done: every extension is `extensions/<name>/` (`git mv`, history kept); browser halves copied from
+  ../chalky-agent/plugins (working tree, with the uncommitted ui_history.js fix) as `<name>/browser.js`;
+  `chat_ui.html` is `page/page.html`; the ui components, agents.js, voice.js, the browser libraries
+  (package.json, node_modules) and the ui skills (ui-check, ui-design, agent-apps) are in `extensions/ui/`.
+- New `page` extension: `GET /`, `GET /page/scripts` (every `extensions/*/browser.js` found, like pi finds
+  index.ts: an extension registers nothing), `GET /extensions/<name>/browser.js` (only that file). `host.scripts`
+  is gone. The page reloads after a version that changes page.html or a browser.js.
+- `ui` now serves `/ui/` (apps from app/ui/apps; components/, agents.js, voice.js, node_modules/ from its folder;
+  anything else 404, `..` refused) and `/ui-api/catalog`, `/ui-api/about`; the catalog moved out of server.ts.
+  Host offers `host.file(res, path)`. URLs the page and apps use are unchanged.
+- Texts: the prompt intro (one folder per extension; the page is the page extension), ui guide paths,
+  plugin-map (map = `extensions/*/` headers), write-skill (a feature's skills go in its extension), headers.
+- Version history: the old one moved to `state/versions.git.before-folders` (kept): every old version needs
+  `host.scripts`, so rolling back to one would break the agents and the page. A new history started ("original"
+  = the new layout).
+- Two fixes from earlier that NOTES described but the code didn't have: `/versions` entries' `shot` field, and
+  `{saved: false}` (200) instead of 409 for a second picture. Both in now.
+- Tested: every route (page, 6 browser parts, /ui/ files and 404s, catalog, history, versions, files, viewer
+  previews of docx/pptx/xlsx/pdf); headless page: 5 surfaces drawn, palette, files panel, app frame, no error
+  notes; agent1 lists all 5 skills (3 from the ui extension), also after its reload tool; an agent edit made a
+  version with the request as message and the open page took its picture; rollback restored the file, new
+  commit by user; undo/redo; upload; tests/versions-ignore.mjs passes (isomorphic-git still has the bug).
+- Not done: pi-message -> page translation still in server.ts (belongs to the page extension; a later step).
+  The broken-page risk (an agent breaks the page, so the Versions panel too): later, with start.sh recovery.
 
 ## Doc/reality mismatches (pi 1.4.0)
 - `examples/extensions/reload-runtime.ts`: `pi.sendUserMessage("/reload-runtime", {deliverAs: "followUp"})` reaches
