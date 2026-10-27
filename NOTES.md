@@ -396,6 +396,32 @@ Seen, not changed:
 - Note: a broken extension's old routes stay after a reload (host.routes isn't cleared), so the page breaks only
   at the next start. Then /recover.
 
+## Doodle and screen (2026-10-27)
+- doodle: the Python doodle plugin as an extension (index.ts, guide.md, browser.js = doodle.js unchanged but its
+  header). Three tools in the palette: marker (drag draws, typing writes, a click after drawing makes a step:
+  a picture cropped to the drawing), Text (click, type, Enter), eraser (lines, words, and unsent frames through
+  the "erase" page event). Enter in the message line sends doodle_send; the server writes it as words and the
+  steps' pictures go with it.
+- screen: the Python screen plugin as an extension. The page shares its tab once (getDisplayMedia) and uploads
+  crops (POST /screen/shot, png, at most 8 MB, saved in state/screens); agents get see_user_screen (the page shows
+  "agentN wants to see your screen · Share / No" if the tab isn't shared yet; 90 s, or Stop). host.api.screen.isShot
+  (path): only pictures saved there can be attached (a doodle_send naming /etc/passwd attaches nothing).
+- Pictures with a message: pi's prompt(text, {images}) and steer(text, images) take {type: "image", data, mimeType}.
+  host.prompt got an images argument; swarm items carry png paths, read when the agent gets the item.
+- Tested: palette shows the three tools; a line drawn and a click made "1 mark"; Enter sent it (words only, the tab
+  not shared) and agent1 read the step; a doodle_send with a real png (sent over /ws): the model answered "A pink
+  circle"; see_user_screen answered by a stand-in page: picture and the main-space offset reached the model; the
+  page's card, "No" clicked: the agent was told and the card went; Text wrote "make bigger"; the eraser removed
+  it and an unsent frame (the frames eraser, untested before).
+- Not testable here: sharing the tab. Headless Chrome (chrome-headless-shell 155, and Playwright's full Chromium
+  with --headless=new) fails getDisplayMedia with "NotReadableError: Could not start video source", also with
+  --auto-accept-this-tab-capture. So the picture from a real share needs a real browser.
+- Seen: state/screens grows (as in Python; nothing removes old pictures). My new extension folders were committed
+  in the versions history under agent1's next turn (the known attribution effect), and that version reloaded the
+  open page (a new browser.js), which cleared the doodle steps in progress.
+- The user's meme-maker app logs "Uncaught SyntaxError: Identifier 'top' has already been declared" (its own
+  index.html, made by an agent). Not touched.
+
 ## Doc/reality mismatches (pi 1.4.0)
 - A Stop during a tool call is saved as stopReason "error" ("This operation was aborted"), though StopReason has
   "aborted". Handled in the host (host.abort).
@@ -412,8 +438,7 @@ Seen, not changed:
 - Thinking level is "off": the model is set after the session is made. Set it explicitly.
 - Shared state between agents goes through `globalThis.chalky` (a convention of ours; pi extensions are per session).
 - Not ported yet:
-  doodle, screen, voice, tasks, mcp (pi has
-  MCP). (vision: covered by pi's read.)
+  voice, tasks, mcp (pi has MCP). (vision: covered by pi's read.)
 - `npm audit`: 1 high + 1 moderate, both undici 8.10.2 inside pi 1.4.0 (EventSource memory DoS, SRI bypass,
   content-encoding DoS). npm's only "fix" is downgrading pi to 0.75.3, so not applied; wait for a pi release.
   The viewer libraries add none.

@@ -52,7 +52,8 @@ const host = {
 
   // One run: the agent answers input. Returns its final answer, or "(error: ...)". Then a reload it asked for.
   // replyTo: who the answer goes to (the page labels it). Saved as a "chalky.turn" entry, which the model doesn't see.
-  async prompt(name: string, input: string, replyTo?: string) {
+  // images: pictures sent with the input (pi's {type: "image", data: base64, mimeType}), e.g. doodle's steps.
+  async prompt(name: string, input: string, replyTo?: string, images?: { type: "image"; data: string; mimeType: string }[]) {
     const a = host.agents.get(name)!;
     if (replyTo) {
       a.session.sessionManager.appendCustomEntry("chalky.turn", { reply_to: replyTo });
@@ -60,7 +61,7 @@ const host = {
     }
     a.stopped = false;
     try {
-      await a.session.prompt(input);
+      await a.session.prompt(input, images?.length ? { images } : undefined);
       const last = [...a.session.messages].reverse().find((m: any) => m.role === "assistant");
       if (a.stopped) return "(stopped)";  // pi 1.4.0 can record a stop as stopReason "error" ("This operation was aborted")
       if (last?.stopReason === "error") {

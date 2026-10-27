@@ -16,7 +16,9 @@
 //     timeout. Asking an agent that is waiting on you is refused (use tell).
 // Shared state is plain data on the host (host.shared "swarm"); the code that acts on it is this file's newest load
 // (host.api.swarm), so an edited swarm/index.ts takes effect after a reload. Agents: host.agents (role, app, session).
-// Not ported: images with messages (doodle), the tasks plugin's "blocked" state.
+// Pictures with a message (doodle's steps): send(..., images) takes png paths; they go to pi with the text (prompt
+// or steer), read when the agent gets the message.
+// Not ported: the tasks plugin's "blocked" state.
 import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -32,7 +34,7 @@ const APP_MESSAGES_PER_MINUTE = 30;  // from apps (the page) to agents
 const TEAM = fs.readFileSync(path.join(import.meta.dirname, "team.md"), "utf8");
 
 type Waiter = { resolve: (answer: string) => void } | null;
-type Item = { kind: string; sender: string; text: string; chain: string[]; ts: number; waiter: Waiter };
+type Item = { kind: string; sender: string; text: string; chain: string[]; ts: number; waiter: Waiter; images?: string[] };
 
 if (!host.shared.has("swarm"))
   host.shared.set("swarm", { inbox: {}, running: new Set(), chain: {}, waiting: {}, doing: {}, sent: 0, recent: {},
@@ -54,10 +56,14 @@ function changed(name?: string, doing?: string) {
   host.broadcast("status", { agents: status() });
 }
 
-function put(to: string, kind: string, sender: string, text: string, chain: string[], waiter: Waiter = null) {
-  const item: Item = { kind, sender, text, chain, ts: Date.now(), waiter };
+// png paths -> pi's image content (a file gone since is left out)
+const pictures = (paths: string[] = []) => paths.filter((p) => fs.existsSync(p))
+  .map((p) => ({ type: "image" as const, data: fs.readFileSync(p).toString("base64"), mimeType: "image/png" }));
+
+function put(to: string, kind: string, sender: string, text: string, chain: string[], waiter: Waiter = null, images?: string[]) {
+  const item: Item = { kind, sender, text, chain, ts: Date.now(), waiter, images };
   const session = host.agents.get(to).session;
-  if (["note", "reply", "fyi"].includes(kind) && session.isStreaming) void session.steer(`${header(item)}\n${text}`);
+  if (["note", "reply", "fyi"].includes(kind) && session.isStreaming) void session.steer(`${header(item)}\n${text}`, pictures(images));
   else if (kind === "fyi")  // its turn ended before it was handed over: file it, don't start a turn
     void session.sendCustomMessage({ customType: "inbox", content: `${header(item)}\n${text}`, display: true });
   else {
@@ -77,7 +83,7 @@ async function work(name: string) {
       const item = inbox(name).shift()!;
       const to = target(item.chain);
       S.chain[name] = item.chain;
-      const answer = await host.prompt(name, `${header(item, to)}\n${item.text}`, to);
+      const answer = await host.prompt(name, `${header(item, to)}\n${item.text}`, to, pictures(item.images));
       delete S.chain[name];
       if (item.waiter) item.waiter.resolve(answer);  // a question: the asker is waiting
       else if (to !== "user" && to !== name && answer.trim()) put(to, "reply", name, answer, item.chain.slice(1));
@@ -135,10 +141,10 @@ function ask(asker: string, to: string, text: string, signal?: AbortSignal) {
 const api = {
   status,
   // From the user or the harness (the page's chat, apps, ui actions). The answer is shown in the chat.
-  // Returns the item (for withdraw).
-  send(sender: string, to: string, text: string, note = false) {
+  // Returns the item (for withdraw). images: png paths sent with it.
+  send(sender: string, to: string, text: string, note = false, images?: string[]) {
     if (sender === "user") S.sent = 0;  // a new user message gives the team a fresh budget
-    return put(to, note ? "note" : "message", sender, text, [sender]);
+    return put(to, note ? "note" : "message", sender, text, [sender], null, images);
   },
   // An update for an agent that doesn't start a turn (filed if idle, between its tool calls if busy)
   fyi(sender: string, to: string, text: string) { return put(to, "fyi", sender, text, [sender]); },
