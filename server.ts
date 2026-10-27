@@ -100,7 +100,9 @@ const host = {
     if (old) { old.unsubscribe(); old.session.dispose(); }
     const dir = path.join(STATE, "sessions", name);
     fs.mkdirSync(dir, { recursive: true });
-    const settingsManager = SettingsManager.inMemory();
+    // projectTrusted false: pi ignores workspace/.pi/ (its SYSTEM.md, extensions, skills, settings), so an agent's
+    // project files can't change it; app/ (versioned) is the only place
+    const settingsManager = SettingsManager.inMemory({}, { projectTrusted: false });
     // agentDir = app/: pi finds app/extensions/<name>/index.ts and app/skills/* itself, again on every reload
     const resourceLoader = new DefaultResourceLoader({ cwd: WORK, agentDir: APP, settingsManager, noContextFiles: true });
     await resourceLoader.reload();

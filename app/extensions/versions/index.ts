@@ -28,7 +28,7 @@ const host = (globalThis as any).chalky;
 const GIT_DIR = path.join(host.state, "versions.git");
 const SHOTS = path.join(host.state, "shots");
 const MAX_SHOT = 10 * 1024 * 1024;
-const CODE = ["extensions/", "skills/", "ui/"];
+const CODE = ["extensions/", "skills/", "ui/", "SYSTEM.md"];
 const IGNORE = ["auth.json", "models-store.json", "node_modules/"];
 const repo = { fs, dir: host.app, gitdir: GIT_DIR };
 const who = (name: string) => ({ name, email: `${name}@chalky` });
@@ -95,7 +95,7 @@ export default function (pi: ExtensionAPI) {
       const stray = changed.filter((p) => !CODE.some((c) => p.startsWith(c)) && fs.existsSync(path.join(host.app, p)));
       if (stray.length && host.agents.has(agent))
         host.api.swarm?.send("system", agent, `Your last turn changed files in ${host.app} that aren't your code: ${stray.slice(0, 5).join(", ")}. `
-          + `${host.app} is your own code (extensions, skills, ui): it is versioned, and a rollback would undo these files. `
+          + `${host.app} is your own code (extensions, skills, ui, SYSTEM.md): it is versioned, and a rollback would undo these files. `
           + `Move project work to ${host.work} and use it from there.`, true);
     });
   });

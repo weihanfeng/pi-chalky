@@ -438,10 +438,18 @@ Seen, not changed:
   host's Agent lost `joined` and `replyTo`. Tested: a page opening got 596 messages; a live message came with
   reply_to; run_start/run_end; idle fyis (from a recovery) shown; one "joined" per session file; the page in
   Chrome shows the conversation.
-- Not done: pi's preamble ("You are an expert coding assistant operating inside pi..."). pi has no way to replace
-  only it: customPrompt also drops pi's tools, rules (how to use edit) and docs (where pi's extension docs are)
-  sections, and a returned systemPrompt is built from the sections before later extensions add theirs. The
-  builder (buildSystemPromptSections) isn't exported.
+- pi's preamble ("You are an expert coding assistant operating inside pi..."): replaced the pi way, with
+  app/SYSTEM.md (docs/configuration.md: "<agent-dir>/SYSTEM.md replaces Pi's default system prompt"; agentDir is
+  app/). It replaces pi's preamble and its tools, rules and docs sections (inside pi it becomes customPrompt).
+  Kept in our words: who the agent is, and the tool rules worth having (read/bash/edit/write; the no-op edit).
+  tools dropped (the model gets every tool's description anyway). docs: a plain file can't hold paths, so the
+  prompt extension's intro points at pi's docs with pi's own getDocsPath/getExamplesPath/getReadmePath.
+  SYSTEM.md counts as code for the versions extension (no stray-file warning).
+- Project trust: SettingsManager.inMemory() trusts the project (cwd = workspace/) by default, so a
+  workspace/.pi/SYSTEM.md (or .pi/extensions, skills, settings) would have been used, unversioned. Now
+  inMemory({}, {projectTrusted: false}). Tested: a planted workspace/.pi/SYSTEM.md ("answer only BANANA") was
+  ignored; agent1's sections: preamble (SYSTEM.md), skills, cwd, then ours; asked who it is and where pi's
+  extension docs are, it answered with the real path.
 
 ## Doc/reality mismatches (pi 1.4.0)
 - A Stop during a tool call is saved as stopReason "error" ("This operation was aborted"), though StopReason has
@@ -455,7 +463,6 @@ Seen, not changed:
 
 ## Open questions / gaps
 - "agent joined" shows one line late: pi saves the system message after the first user message.
-- pi's default prompt preamble ("expert coding assistant operating inside pi") is still in front of Chalky's.
 - Shared state between agents goes through `globalThis.chalky` (a convention of ours; pi extensions are per session).
 - Not ported yet:
   voice, tasks, mcp (pi has MCP). (vision: covered by pi's read.)
