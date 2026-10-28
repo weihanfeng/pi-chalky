@@ -164,5 +164,5 @@ export default function (pi: ExtensionAPI) {
 
   host.routes.set("/versions/dom-to-image-more.js", (_req: any, res: any) =>
     res.writeHead(200, { "content-type": "text/javascript" })
-      .end(fs.readFileSync(path.join(host.root, "node_modules/dom-to-image-more/dist/dom-to-image-more.min.js"))));
+      .end(fs.readFileSync(path.join(host.modules, "dom-to-image-more/dist/dom-to-image-more.min.js"))));
 }

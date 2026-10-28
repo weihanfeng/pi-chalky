@@ -1,4 +1,4 @@
-// Bridge from an app (/app/ui/apps/<name>/, shown by the App component) to the agents. An app imports it:
+// Bridge from an app ({code}/ui/apps/<name>/, shown by the App component) to the agents. An app imports it:
 //   import agents from "/ui/agents.js";
 //   agents.send(to, text)         a message to an agent, from "app"; its answer comes as a "message" event
 //                                 (role "assistant", no tool_calls). Each one is a model call: limited per minute.
@@ -12,8 +12,8 @@
 //   agents.load()                 this app's saved data ({} at first), from the appdata plugin (on the server)
 //   agents.save(data)             replace it; every page and app frame then gets "app_data" {app, data}, so
 //                                 the same app in other surfaces updates (check ev.app === agents.app)
-//   agents.app                    this app's name: its folder in /app/ui/apps
-// It opens its own WebSocket to /ws, the page's protocol (see /app/plugins/chat_ui.py).
+//   agents.app                    this app's name: its folder in {code}/ui/apps
+// It opens its own WebSocket to /ws, the page's protocol (the page extension).
 const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
 const open = new Promise((resolve) => ws.addEventListener("open", resolve));
 const listeners = {};

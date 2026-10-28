@@ -586,8 +586,8 @@
     if (!v) return;
     detail.textContent = `${v.short} · ${v.author} · ${new Date(v.date).toLocaleString()}` + (v.current ? " · current" : "");
     rollbackBtn.disabled = v.current;
-    preview.hidden = false;
-    preview.src = `/versions/${v.sha}/shot`;
+    preview.hidden = !v.shot;  // a version made while no page was open has no picture
+    if (v.shot) preview.src = `/versions/${v.sha}/shot`;
   }
 
   function select(i) {

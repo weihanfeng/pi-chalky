@@ -10,7 +10,7 @@
 // In this folder: components/*.js (the catalog), agents.js and voice.js (what apps import), package.json and
 // node_modules/ (browser libraries components import), skills/ (ui-design, ui-check, agent-apps: given to pi).
 //   GET /ui/apps/<name>/...  an app (app/ui/apps: what the agents built)
-//   GET /ui/components/..., /ui/agents.js, /ui/voice.js, /ui/node_modules/...  from this folder
+//   GET /ui/components/..., /ui/agents.js, /ui/voice.js  from this folder; /ui/node_modules/{marked,dompurify}/...  the host's
 //   GET /ui-api/catalog (name -> mtime), /ui-api/about (name -> about block), /ui-api/surfaces
 // App messages and app_reset: swarm/.
 import fs from "node:fs";
@@ -22,7 +22,8 @@ const host = (globalThis as any).chalky;
 const DESIGN = path.join(host.app, "ui/surfaces.json");
 const APPS = path.join(host.app, "ui/apps");
 const COMPONENTS = path.join(import.meta.dirname, "components");
-const SERVED = ["components/", "agents.js", "voice.js", "node_modules/"];  // what /ui/ serves from this folder
+const SERVED = ["components/", "agents.js", "voice.js"];  // what /ui/ serves from this folder
+const LIBS = ["marked/", "dompurify/"];  // the page's browser libraries, from the host's node_modules (its package.json)
 const DATA = path.join(host.state, "ui-data.json");
 const read = (p: string, d: any) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : d);
 const clone = (v: any) => structuredClone(v);
@@ -234,6 +235,8 @@ export default function (pi: ExtensionAPI) {
     if (!url.startsWith("/ui/")) return res.writeHead(404).end();  // also a ".." out of /ui/
     const p = url.slice("/ui/".length);
     if (p.startsWith("apps/")) return host.file(res, path.join(APPS, p.slice("apps/".length)));
+    const lib = p.slice("node_modules/".length);
+    if (p.startsWith("node_modules/")) return LIBS.some((l) => lib.startsWith(l)) ? host.file(res, path.join(host.modules, lib)) : res.writeHead(404).end();
     if (!SERVED.some((s) => p === s || (s.endsWith("/") && p.startsWith(s)))) return res.writeHead(404).end();
     host.file(res, path.join(import.meta.dirname, p));
   });

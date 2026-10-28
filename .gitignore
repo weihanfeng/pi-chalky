@@ -15,3 +15,6 @@ app/ui/apps/*
 # Installed by npm
 node_modules/
 *.log
+
+# Our working notes: local only, never on GitHub or npm
+NOTES.md

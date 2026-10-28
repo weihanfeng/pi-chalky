@@ -8,6 +8,7 @@
 // Extensions reach the host through globalThis.chalky (pi loads them with jiti, so they don't share our imports).
 // Run: MODEL_BASE_URL=... MODEL_API_KEY=... [MODEL_NAME=...] [MODEL_THINKING=...] node server.ts   (Node >= 22.19: it runs the TypeScript as is)
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import http from "node:http";
 import path from "node:path";
 import { createAgentSession, createCodemodeExtension, createMcpExtension, createToolSearchExtension, DefaultResourceLoader, SessionManager,
@@ -15,13 +16,24 @@ import { createAgentSession, createCodemodeExtension, createMcpExtension, create
 import git from "isomorphic-git";
 import { WebSocketServer } from "ws";
 
-const ROOT = import.meta.dirname;
-const APP = path.join(ROOT, "app");                       // agent-editable, pi's agentDir: extensions/, skills/, ui/ (what they built)
-const STATE = path.join(ROOT, "state");                   // conversations and data, not code
+const ROOT = import.meta.dirname;                         // this package: server.ts and the starting app/
+// HOME: where this Chalky keeps its things. CHALKY_HOME (bin/chalky.mjs, an installed copy: ~/.chalky), else this folder
+const HOME = process.env.CHALKY_HOME ? path.resolve(process.env.CHALKY_HOME) : ROOT;
+const APP = path.join(HOME, "app");                       // agent-editable, pi's agentDir: extensions/, skills/, ui/ (what they built)
+const STATE = path.join(HOME, "state");                   // conversations and data, not code
+// our dependencies' folder (npm may put it above this package)
+const MODULES = path.resolve(createRequire(import.meta.url).resolve("ws/package.json"), "../..");
+if (!fs.existsSync(APP)) fs.cpSync(path.join(ROOT, "app"), APP, { recursive: true });  // first run: the starting code
+if (HOME !== ROOT) {  // HOME/app's extensions import our dependencies: Node looks for a node_modules above them
+  const link = path.join(HOME, "node_modules");
+  if (fs.lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()) fs.unlinkSync(link);  // again each start: the package may have moved
+  if (fs.existsSync(link)) throw new Error(`${link} is in the way: Chalky links it to ${MODULES}`);
+  fs.symlinkSync(MODULES, link, "junction");
+}
 // pi's agent folder for the code that doesn't take our agentDir but calls getAgentDir() (its MCP extension: mcp.json
 // and mcp-auth.json): the same app/
 process.env.PI_CODING_AGENT_DIR = APP;
-const WORK = path.join(ROOT, "workspace");                // the agents' working folder (bash runs here)
+const WORK = path.join(HOME, "workspace");                // the agents' working folder (bash runs here)
 for (const d of [STATE, WORK]) fs.mkdirSync(d, { recursive: true });
 
 type Agent = { name: string; role: string; app?: string; session: any; unsubscribe: () => void;
@@ -29,7 +41,7 @@ type Agent = { name: string; role: string; app?: string; session: any; unsubscri
 
 const sockets = new Set<any>();
 const host = {
-  root: ROOT, app: APP, state: STATE, work: WORK,
+  root: ROOT, app: APP, state: STATE, work: WORK, modules: MODULES,
   agents: new Map<string, Agent>(),
   routes: new Map<string, (req: http.IncomingMessage, res: http.ServerResponse) => void>(),  // path -> handler (a path ending in /: also every path under it)
   pageHandlers: new Map<string, (msg: any) => void>(),  // one per extension (not per agent): key -> handler
