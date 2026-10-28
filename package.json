@@ -1,6 +1,6 @@
 {
   "name": "pi-chalky",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Chalky on pi: agents build what you see in the browser, and you point at it and mark it up",
   "license": "MIT",
   "type": "module",
@@ -17,6 +17,9 @@
     "!app/ui/surfaces.json",
     "!app/ui/apps/*",
     "app/ui/apps/.keep"
+  ],
+  "bundleDependencies": [
+    "xlsx"
   ],
   "engines": {
     "node": ">=22.19.0"
