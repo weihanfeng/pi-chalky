@@ -12,7 +12,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({ reason: Type.String() }),
     async execute(_id, a) {
       const host = (globalThis as any).chalky, name = pi.getSessionName();
-      host.reloadAfterTurn.add(name);
+      host.reloadAfterTurn.set(name, false);  // not quiet: the page notes the reload
       host.shared.set(`reload-reason ${name}`, a.reason);  // the versions plugin's commit message for this turn
       return { content: [{ type: "text", text: "Reload scheduled for when your turn ends. End your turn now; don't call reload again." }],
                details: undefined };

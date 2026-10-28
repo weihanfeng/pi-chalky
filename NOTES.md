@@ -478,6 +478,36 @@ Seen, not changed:
   follow rules in each short guide. Not re-tested after that change (the user: skip for now).
 - Prompt now ~2,400 tokens + the must-follow lines (~1,000 for all guides together, was ~5,200).
 
+## MCP: pi's built-in MCP and a /mcp picker (2026-10-28)
+- pi has a whole MCP client built in (docs/mcp.md): stdio and streamable HTTP servers in `mcp.json`, sign-ins,
+  tools named `mcp__<server>__<tool>`, and an exposure per server or tool: `direct` (an ordinary tool), `deferred`
+  (found with tool_search), `codemode` (the default: called from scripts the model writes), `hidden` (off).
+- SDK sessions don't load it: server.ts adds `createCodemodeExtension()`, `createToolSearchExtension()` and
+  `createMcpExtension({ logPath: state/mcp.log })` to the loader (sdk.md, examples/sdk/14-codemode-mcp.ts).
+- The servers are in `app/mcp.json` (versioned like code; `mcp-auth.json`, pi's sign-ins, is ignored). GitHub has it
+  empty (`{"mcpServers": {}}`): a gateway is one more entry someone adds. Here it holds the local gateway, kept out of
+  git with `git update-index --skip-worktree app/mcp.json` (undo: `--no-skip-worktree`):
+  ```json
+  "gateway": { "url": "http://127.0.0.1:8811/mcp", "headers": { "Authorization": "Bearer ${MCP_API_KEY}" },
+               "exposure": "direct", "description": "..." }
+  ```
+  Started with `MCP_API_KEY` = `MCP_GATEWAY_TOKEN` from chalky-platform's backend/.env (a sandbox would use the key
+  proxy's /mcp route and its own token). pi connects one MCP session per agent.
+- The picker (app/extensions/mcp/, ~60 lines each half): "/mcp" on the page lists the servers in mcp.json and agent1's
+  tools for each (`session.getAllTools()`, by namespace; hidden ones are registered too). A server's box writes `"enabled": false`, a tool's box
+  `"toolExposure": {"<tool>": "hidden"}`: the fields pi's own /mcp screen writes. Then every agent reloads (a busy
+  one after its turn; reloads queued one round after another; quiet: no "extensions reloaded" note, which
+  `host.reloadAgent(name, quiet)` and `reloadAfterTurn`, now a Map name -> quiet, allow; the reload tool keeps its note). Ticking a tool on writes the server's own exposure
+  (or "direct" if that is hidden), so the file always says what's ticked. Picks are versioned with the code, so a
+  rollback brings old ones back.
+- Tested in a headless browser (ui-check): untick, retick, server off (tools greyed) and on ("no tools yet", then 5/5
+  once reconnected), a broken mcp.json (its error shown, nothing written), four quick clicks (four rounds in order).
+- Tested: pi → LiteLLM → openai-oauth → gpt-6-luna called `mcp__gateway__tavily_search` and answered from it;
+  unticking crawl and map left the agent with exactly extract, research and search after the reload.
+- LiteLLM was down: its db container lost its port binding after a Docker restart (`PortBindings` set,
+  `NetworkSettings.Ports` empty), so LiteLLM restarted 70 times on "P1001: Can't reach database server at
+  127.0.0.1:5433". Fixed by recreating only the db container (`up -d --force-recreate db`; data in the volume).
+
 ## Doc/reality mismatches (pi 1.4.0)
 - A Stop during a tool call is saved as stopReason "error" ("This operation was aborted"), though StopReason has
   "aborted". Handled in the host (host.abort).
@@ -487,12 +517,22 @@ Seen, not changed:
   Fix here: the tool marks the agent; the host calls `session.reload()` after the turn.
 - `DefaultResourceLoader({ additionalExtensionPaths: [<folder>] })` fails ("Cannot find module <folder>"); the folder
   scan in extensions/loader.js isn't used for these paths. Fix here: agentDir = app/ (pi's own `extensions/` folder).
+- pi's MCP extension reads `mcp.json` (and `mcp-auth.json`) from `getAgentDir()` (`~/.pi/agent`), not from the
+  session's `agentDir`, though the SDK docs say it reads "the agent directory". Fix here: server.ts sets
+  `PI_CODING_AGENT_DIR` (documented in configuration.md) to app/.
+- `url` in mcp.json isn't expanded (`${VAR}` works only in `headers` and `env`): runtime.js passes `config.url` as is.
+- `session.reload()` emits `session_start` again only when the session has a binding (UI, command actions, shutdown
+  handler or error listener). After `bindExtensions({})` a reload left pi's MCP unconnected: no MCP tools at all.
+  Fix here: `bindExtensions({ onError })`, which also logs extension errors (and shows them on the page).
+- `pi.getAllTools()` has no tool label (pi's `server/tool`), so the picker takes an MCP tool's real name from `name`
+  minus `mcp__<server>__` (`namespace.name` + `__`; the server is `namespace.aliases[0]`). A tool name pi had to
+  change (characters other than letters, digits, _; a hash suffix) would show changed.
 
 ## Open questions / gaps
 - "agent joined" shows one line late: pi saves the system message after the first user message.
 - Shared state between agents goes through `globalThis.chalky` (a convention of ours; pi extensions are per session).
 - Not ported yet:
-  voice, tasks, mcp (pi has MCP). (vision: covered by pi's read.)
+  voice, tasks. (vision: covered by pi's read.)
 - `npm audit`: 1 high + 1 moderate, both undici 8.10.2 inside pi 1.4.0 (EventSource memory DoS, SRI bypass,
   content-encoding DoS). npm's only "fix" is downgrading pi to 0.75.3, so not applied; wait for a pi release.
   The viewer libraries add none.

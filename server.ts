@@ -37,7 +37,7 @@ const host = {
                                                     // also what pi.on misses, e.g. a message filed while idle); key -> handler
   connectHandlers: new Map<string, (send: (type: string, data: object) => void) => void>(),  // a page opened: what it gets first
   shared: new Map<string, any>(),                   // state extensions share across agents (e.g. the surfaces)
-  reloadAfterTurn: new Set<string>(),               // agents whose extensions load again when their turn ends
+  reloadAfterTurn: new Map<string, boolean>(),      // agents whose extensions load again when their turn ends -> quiet
   api: {} as Record<string, any>,                   // services extensions offer by name (e.g. swarm); the newest load wins
   file,                                             // file(res, path): send a file (type from its extension; 404 if none)
 
@@ -78,7 +78,8 @@ const host = {
       emit("error", { agent: name, text: String(e) });
       return `(error: ${e})`;
     } finally {
-      if (host.reloadAfterTurn.delete(name)) await host.reloadAgent(name);
+      const quiet = host.reloadAfterTurn.get(name);
+      if (host.reloadAfterTurn.delete(name)) await host.reloadAgent(name, quiet);
     }
   },
 
@@ -90,12 +91,13 @@ const host = {
     await a.session.abort();
   },
 
-  // load an agent's extensions, skills and prompt again (pi's reload; the conversation stays)
-  async reloadAgent(name: string) {
+  // load an agent's extensions, skills and prompt again (pi's reload; the conversation stays). quiet: no
+  // "extensions reloaded" note on the page (errors still show)
+  async reloadAgent(name: string, quiet = false) {
     const a = host.agents.get(name)!;
     await a.session.reload();
     for (const e of a.session.resourceLoader.getExtensions().errors) emit("error", { agent: name, text: `extension ${e.path}: ${e.error}` });
-    emit("error", { agent: name, text: "extensions reloaded" });  // shown as a note on the page
+    if (!quiet) emit("error", { agent: name, text: "extensions reloaded" });  // shown as a note on the page
   },
 
   // fresh: a new session file (an empty memory); the old files stay, and the page still shows them
@@ -121,7 +123,12 @@ const host = {
       sessionManager: fresh ? SessionManager.create(WORK, dir) : SessionManager.continueRecent(WORK, dir),
     });
     if (session.sessionName !== name) session.setSessionName(name);
-    await session.bindExtensions({});  // starts the extensions' session (session_start)
+    // starts the extensions' session (session_start). onError, besides showing extensions' errors: pi 1.4.0's reload()
+    // sends session_start again only to a session with a binding, and without it pi's MCP doesn't reconnect after a reload
+    await session.bindExtensions({ onError: (e) => {
+      console.error(`${name}: extension ${e.extensionPath} (${e.event}): ${e.error}`);
+      emit("error", { agent: name, text: `extension ${e.extensionPath} (${e.event}): ${e.error}` });
+    } });
     const model = session.modelRuntime.getModel("chalky", process.env.MODEL_NAME || "default");
     if (model) await session.setModel(model);
     // MODEL_THINKING: pi's thinking level (minimal, low, medium, high, ...), sent as reasoning_effort. Unset: none is
