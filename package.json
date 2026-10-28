@@ -1,6 +1,6 @@
 {
   "name": "pi-chalky",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Chalky on pi: agents build what you see in the browser, and you point at it and mark it up",
   "license": "MIT",
   "type": "module",

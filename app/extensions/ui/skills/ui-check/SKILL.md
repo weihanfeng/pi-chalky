@@ -12,8 +12,8 @@ From this skill's folder (paths here are relative to it):
 ```
 node scripts/check.mjs URL [STEPS ...] [--size 1280x800] [--shot /tmp/ui.png] [--full]
 ```
-- URL: the user's page is `http://127.0.0.1:3000/`. An app you built is served by it too
-  (`http://127.0.0.1:3000/ui/apps/<name>/index.html`); any other file: `file:///<full path>`.
+- URL: the user's page is `{page}/`. An app you built is served by it too
+  (`{page}/ui/apps/<name>/index.html`); any other file: `file:///<full path>`.
 - Steps run in order after the page loads (it gets 1.5 s first):
   `wait:500`, `click:#pause`, `drag:#card=200,0`, `altdrag:#top=-150,0` (Alt held), `hold:.label=800` (press and hold),
   `dblclick:.label`, `type:#message=hello`, `key:Enter`, `eval:document.querySelectorAll('.agent').length`,
@@ -29,7 +29,7 @@ node scripts/check.mjs URL [STEPS ...] [--size 1280x800] [--shot /tmp/ui.png] [-
 
 Example: did the map fit, and does pause work?
 ```
-node scripts/check.mjs http://127.0.0.1:3000/ \
+node scripts/check.mjs {page}/ \
   "eval:getComputedStyle(document.querySelector('#map')).height" click:#pause \
   "eval:document.querySelector('#pause').textContent" --shot /tmp/ui.png
 ```
@@ -54,7 +54,7 @@ is any text unreadable?"). Look after a real change, not after every run: each i
 conversation and adds to every later call.
 
 ## Careful: the page is live
-`http://127.0.0.1:3000/` is the real page connected to the real agents. A click or a typed message
+`{page}/` is the real page connected to the real agents. A click or a typed message
 there really happens: sending a message wakes an agent, Stop stops everyone, rollback changes
 code. Click only what you mean to test, prefer pause/resume over stop, and test destructive controls
 on a copy (a replay, or your own test page), not on the live system. Dialogs are dismissed unless

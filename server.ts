@@ -34,6 +34,7 @@ if (HOME !== ROOT) {  // HOME/app's extensions import our dependencies: Node loo
 // and mcp-auth.json): the same app/
 process.env.PI_CODING_AGENT_DIR = APP;
 const WORK = path.join(HOME, "workspace");                // the agents' working folder (bash runs here)
+const PORT = Number(process.env.PORT || 3000);            // the page's port
 for (const d of [STATE, WORK]) fs.mkdirSync(d, { recursive: true });
 
 type Agent = { name: string; role: string; app?: string; session: any; unsubscribe: () => void;
@@ -41,7 +42,7 @@ type Agent = { name: string; role: string; app?: string; session: any; unsubscri
 
 const sockets = new Set<any>();
 const host = {
-  root: ROOT, app: APP, state: STATE, work: WORK, modules: MODULES,
+  root: ROOT, app: APP, state: STATE, work: WORK, modules: MODULES, port: PORT,
   agents: new Map<string, Agent>(),
   routes: new Map<string, (req: http.IncomingMessage, res: http.ServerResponse) => void>(),  // path -> handler (a path ending in /: also every path under it)
   pageHandlers: new Map<string, (msg: any) => void>(),  // one per extension (not per agent): key -> handler
@@ -230,7 +231,7 @@ async function recover(sha: string, res: http.ServerResponse) {
   if (files.includes("ui/surfaces.json")) host.shared.get("ui")?.load?.();
   for (const name of host.agents.keys())
     host.api.swarm?.fyi("system", name, `The user recovered ${APP} to version ${subject} (the page was broken). `
-      + `Later changes are undone (still in the history: GET http://127.0.0.1:3000/versions). Check before relying on them.`);
+      + `Later changes are undone (still in the history: GET http://127.0.0.1:${PORT}/versions). Check before relying on them.`);
   console.log(`recovered to ${subject}`);
   res.writeHead(303, { location: "/" }).end();
 }
@@ -271,4 +272,4 @@ for (const name of fs.readdirSync(path.join(STATE, "sessions")).filter((n) => n 
   await host.createAgent(name, role, app);
 }
 const hostName = process.env.UI_HOST || "127.0.0.1";
-server.listen(3000, hostName, () => console.log(`chalky (pi) on http://${hostName}:3000   (if the page breaks: http://${hostName}:3000/recover)`));
+server.listen(PORT, hostName, () => console.log(`chalky (pi) on http://${hostName}:${PORT}   (if the page breaks: http://${hostName}:${PORT}/recover)`));

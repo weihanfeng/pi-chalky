@@ -29,6 +29,7 @@ Then open http://127.0.0.1:3000.
 | `MODEL_THINKING` | optional thinking level: `minimal`, `low`, `medium`, `high` |
 | `CHALKY_HOME` | where Chalky keeps its things (default: `~/.chalky`) |
 | `UI_HOST` | the address to serve on (default: `127.0.0.1`, this machine only) |
+| `PORT` | the port to serve on (default: `3000`) |
 
 ## Where things are
 

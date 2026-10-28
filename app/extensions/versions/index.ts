@@ -156,7 +156,7 @@ export default function (pi: ExtensionAPI) {
     if (files.includes("ui/surfaces.json")) { host.shared.get("ui")?.load(); host.api.uiHistory?.add("user", `rolled the code back to ${subject}`); }
     for (const name of host.agents.keys())
       host.api.swarm?.fyi("system", name, `The user rolled ${host.app} back to version ${subject}. Later changes are undone `
-        + `(still in the history: GET http://127.0.0.1:3000/versions). Check before relying on them.`);
+        + `(still in the history: GET http://127.0.0.1:${host.port}/versions). Check before relying on them.`);
     const now = await head();
     host.broadcast("version", { agent: "user", sha: now.slice(0, 7), message: `rollback to ${subject}`, files, restart: false });
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true }));
