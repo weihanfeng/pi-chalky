@@ -16,7 +16,7 @@
 //                                    agent, put the files back, reload every agent's extensions (pi's reload), read
 //                                    the surfaces again, and tell each agent (an fyi: no turn).
 //   - Not ported: pip freeze (Python's library list per version).
-// Ignored (info/exclude in the history repo): pi's auth.json and models-store.json (logins), node_modules/.
+// Ignored (info/exclude in the history repo): pi's auth.json, models-store.json and mcp-auth.json (logins), node_modules/.
 // Guard: app/ is the agents' code. If a commit includes other files, its agent is told to move them to the
 // workspace: a rollback would undo them.
 import fs from "node:fs";
@@ -28,8 +28,8 @@ const host = (globalThis as any).chalky;
 const GIT_DIR = path.join(host.state, "versions.git");
 const SHOTS = path.join(host.state, "shots");
 const MAX_SHOT = 10 * 1024 * 1024;
-const CODE = ["extensions/", "skills/", "ui/", "SYSTEM.md"];
-const IGNORE = ["auth.json", "models-store.json", "node_modules/"];
+const CODE = ["extensions/", "skills/", "ui/", "SYSTEM.md", "mcp.json"];
+const IGNORE = ["auth.json", "models-store.json", "mcp-auth.json", "node_modules/"];
 const repo = { fs, dir: host.app, gitdir: GIT_DIR };
 const who = (name: string) => ({ name, email: `${name}@chalky` });
 
@@ -61,6 +61,7 @@ if (!fs.existsSync(GIT_DIR) && !shared.creating) shared.creating = queued(async 
   await git.commit({ ...repo, message: "original", author: who("chalky") });
   await git.tag({ ...repo, ref: "original" });
 });
+else if (fs.existsSync(GIT_DIR)) fs.writeFileSync(path.join(GIT_DIR, "info/exclude"), IGNORE.join("\n") + "\n");  // a history from before an IGNORE change
 
 const head = async () => { await shared.queue; return git.resolveRef({ ...repo, ref: "HEAD" }); };  // after queued work (e.g. the first commit)
 
@@ -95,7 +96,7 @@ export default function (pi: ExtensionAPI) {
       const stray = changed.filter((p) => !CODE.some((c) => p.startsWith(c)) && fs.existsSync(path.join(host.app, p)));
       if (stray.length && host.agents.has(agent))
         host.api.swarm?.send("system", agent, `Your last turn changed files in ${host.app} that aren't your code: ${stray.slice(0, 5).join(", ")}. `
-          + `${host.app} is your own code (extensions, skills, ui, SYSTEM.md): it is versioned, and a rollback would undo these files. `
+          + `${host.app} is your own code (extensions, skills, ui, SYSTEM.md, mcp.json): it is versioned, and a rollback would undo these files. `
           + `Move project work to ${host.work} and use it from there.`, true);
     });
   });

@@ -10,13 +10,17 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, createCodemodeExtension, createMcpExtension, createToolSearchExtension, DefaultResourceLoader, SessionManager,
+  SettingsManager } from "@earendil-works/pi-coding-agent";
 import git from "isomorphic-git";
 import { WebSocketServer } from "ws";
 
 const ROOT = import.meta.dirname;
 const APP = path.join(ROOT, "app");                       // agent-editable, pi's agentDir: extensions/, skills/, ui/ (what they built)
 const STATE = path.join(ROOT, "state");                   // conversations and data, not code
+// pi's agent folder for the code that doesn't take our agentDir but calls getAgentDir() (its MCP extension: mcp.json
+// and mcp-auth.json): the same app/
+process.env.PI_CODING_AGENT_DIR = APP;
 const WORK = path.join(ROOT, "workspace");                // the agents' working folder (bash runs here)
 for (const d of [STATE, WORK]) fs.mkdirSync(d, { recursive: true });
 
@@ -104,7 +108,11 @@ const host = {
     // project files can't change it; app/ (versioned) is the only place
     const settingsManager = SettingsManager.inMemory({}, { projectTrusted: false });
     // agentDir = app/: pi finds app/extensions/<name>/index.ts and app/skills/* itself, again on every reload
-    const resourceLoader = new DefaultResourceLoader({ cwd: WORK, agentDir: APP, settingsManager, noContextFiles: true });
+    // pi's MCP (the CLI's built-in extensions, which SDK sessions don't load): the servers in app/mcp.json, with
+    // codemode and tool_search for servers whose tools aren't direct. Sign-ins: app/mcp-auth.json (not versioned).
+    const resourceLoader = new DefaultResourceLoader({ cwd: WORK, agentDir: APP, settingsManager, noContextFiles: true,
+      extensionFactories: [createCodemodeExtension(), createToolSearchExtension(),
+        createMcpExtension({ logPath: path.join(STATE, "mcp.log") })] });
     await resourceLoader.reload();
     for (const e of resourceLoader.getExtensions().errors) console.error(`${name}: extension ${e.path} failed: ${e.error}`);
     const { session } = await createAgentSession({
