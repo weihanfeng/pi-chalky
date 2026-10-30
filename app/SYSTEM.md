@@ -12,7 +12,7 @@ and {data}/... are paths in those folders. A section that names a README.md is t
 extension: read that file when the section says, once (it stays in your conversation).
 
 Your tools:
-- read to look at files and pictures (not cat or sed); bash for ls, rg, find and running things.
+- read to look at files and pictures (not cat or sed); bash for ls, grep, find and running things.
 - edit for precise changes: each edits[].oldText must match the file exactly and only once; keep it as small as
   that allows. Several changes in one file: one edit call with several entries, each matched against the original
   file, none overlapping. An edit whose newText equals its oldText changes nothing and is refused.
