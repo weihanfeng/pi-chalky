@@ -1,4 +1,4 @@
-# pi-chalky
+# Chalky
 
 Chalky is a workspace where AI agents build what you see. You say what you want, the agents put a working
 first version on the page (forms, tables, dashboards, small apps), and then you point at things on it, draw on
@@ -15,7 +15,7 @@ Needs Node.js 22.19 or newer and an OpenAI-compatible model endpoint (an OpenAI-
 local server).
 
 ```sh
-npm install -g pi-chalky
+npm install -g @chalky/chalky
 MODEL_BASE_URL=https://your-endpoint/v1 MODEL_API_KEY=... MODEL_NAME=your-model chalky
 ```
 
