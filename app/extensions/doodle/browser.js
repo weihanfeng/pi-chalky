@@ -13,6 +13,8 @@
 //           are written down as words, between the steps.
 //   Enter   in the message line (also with the marker off) sends the steps, the drawing still on the page and
 //           the words typed there, together: doodle_send, to the agent picked in the chat.
+//   boards  going to another board (boards/) is like a click: the drawing so far becomes a step, then "went to
+//           board N". Each step says the board it was drawn on.
 // Things with a drag of their own keep it: a surface's label (moves it), its resize corner, lists to pick from,
 // sliders, draggable things, frames; text boxes don't (a drag that starts on one draws). Ctrl+Z takes back
 // the last mark; Esc turns the tools off (ink stays).
@@ -204,6 +206,7 @@ export default async function (page) {
     const box = marks.length ? bounds(marks.flatMap((m) => m.points)) : { x: 0, y: 0, w: innerWidth, h: innerHeight };
     const at = inMain(box.x, box.y);  // the part of the main space the picture shows, so the agent can place things
     const step = { drawn: marks.length > 0, words: marks.filter((m) => m.text).map((m) => m.text), then: [], shot: null,
+                   board: Number(document.body.dataset.board) || 1,  // the board shown (boards/)
                    area: { x: Math.round(at.x), y: Math.round(at.y), width: Math.round(box.w), height: Math.round(box.h) } };
     step.ready = full ? picture(full, box).then((s) => { step.shot = s; }, () => {}) : Promise.resolve();
     steps.push(step);
@@ -211,6 +214,13 @@ export default async function (page) {
     marks = [];
     show();
   }
+  // going to another board (boards/, just before it changes) is like a click: the drawing so far becomes a step
+  document.addEventListener("board", (e) => {
+    if (!marks.length && !steps.length && !first.length) return;  // no doodling going on
+    if (marks.length) keep(frame());
+    (steps.length ? steps.at(-1).then : first).push(`went to board ${e.detail.to}`);
+    render();
+  });
   function clicked(t, surface) {  // a click, as words
     const label = short(t.getAttribute("aria-label") || t.title || t.textContent || t.value || t.localName, 30);
     const row = t.closest("tr, li");
@@ -382,7 +392,7 @@ export default async function (page) {
     render();
     await Promise.all(sent.map((s) => s.ready));
     page.send({ type: "doodle_send", to: document.getElementById("to")?.value, text, first: before,
-                steps: sent.map((s) => ({ shot: s.shot?.path || null, area: s.area, drawn: s.drawn, words: s.words, then: s.then })) });
+                steps: sent.map((s) => ({ shot: s.shot?.path || null, area: s.area, drawn: s.drawn, words: s.words, then: s.then, board: s.board })) });
     allOff();
   }, true);
 }

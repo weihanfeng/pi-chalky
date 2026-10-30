@@ -19,14 +19,15 @@ const host = (globalThis as any).chalky;
 const FILE = path.join(host.state, "notes.json");
 if (!host.shared.has("point"))
   host.shared.set("point", fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, "utf8")) : { last: 0, open: {} });
-const notes = host.shared.get("point");  // {last, open: {id: {text, to, x, y, stroke}}}
+const notes = host.shared.get("point");  // {last, open: {id: {text, to, x, y, stroke, board}}}
 if (!host.shared.has("point-items")) host.shared.set("point-items", new Map());
 const items: Map<string, any> = host.shared.get("point-items");  // note id -> its swarm inbox item (not saved)
 const save = () => fs.writeFileSync(FILE, JSON.stringify(notes));
 
 function pin(text: string, to: string, msg: any) {  // a new open note: saved, pinned on every page
   const id = `n${++notes.last}`;
-  notes.open[id] = { text, to, x: msg.x ?? 0, y: msg.y ?? 0, stroke: msg.stroke ?? null };  // with its drawing, if any
+  notes.open[id] = { text, to, x: msg.x ?? 0, y: msg.y ?? 0, stroke: msg.stroke ?? null,  // with its drawing, if any
+                     board: Number(msg.board) || 1 };  // the board it was written on (boards/): its pin shows there
   save();
   host.broadcast("point_pin", { id, ...notes.open[id] });
   return id;
@@ -78,6 +79,7 @@ export default function (pi: ExtensionAPI) {
       const madeFrom = [...(host.shared.get("ui")?.surfaces[b]?.made_from ?? []).filter((m: string) => m !== a), a];
       const id = pin(`combine ${a} into ${b}: ${text}`, to, msg);
       return items.set(id, swarm.send("user", to, [`[combine on the UI] ${text}`, `  id: ${id} (call note_done("${id}") when dealt with)`,
+        `  board: ${notes.open[id].board}`,
         `  dragged: ${a} (keep it as it is)`, `  onto: ${b} (change this one)`,
         `  so: ui_render(surface="${b}", ..., made_from=${JSON.stringify(madeFrom)}, instruction=<their words>), reading ${a}'s data with {"ref": "${a}", "path": ...}`,
         `  ${a}: ${describe(a)}`, `  ${b}: ${describe(b)}`].join("\n")));
@@ -89,7 +91,7 @@ export default function (pi: ExtensionAPI) {
       + (t.surface ? "(the user drew around this part of the surface: the note is about it)" : "(the user drew around empty space: build inside it)");
     const id = pin(text, to, msg);
     const lines = [`[note on the UI] ${text}`, `  id: ${id} (call note_done("${id}") when dealt with)`,
-      ...([["surface", t.surface], ["component", (t.components ?? []).join(" → ")], ["element", t.element],
+      ...([["board", notes.open[id].board], ["surface", t.surface], ["component", (t.components ?? []).join(" → ")], ["element", t.element],
            ["part", t.part && JSON.stringify(t.part)], ["at", at], ["text", t.text], ["file", t.file?.replace(/^\/app\//, host.app + "/")], ["position", pos],
            ["area", area], ["files", msg.files?.join(", ")]] as [string, any][]).filter(([, v]) => v).map(([k, v]) => `  ${k}: ${v}`)];
     items.set(id, swarm.send("user", to, lines.join("\n")));

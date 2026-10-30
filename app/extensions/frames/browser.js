@@ -64,8 +64,10 @@ export default async function (page) {
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") setOn(false); });
   send.onclick = () => {
     for (const flush of Object.values(timers)) { clearTimeout(flush.t); flush(); }  // text still waiting on the typing pause goes first
-    page.send({ type: "frames_send", to: document.getElementById("to")?.value });
+    page.send({ type: "frames_send", to: document.getElementById("to")?.value, board: board() });
   };
+  const board = () => Number(document.body.dataset.board) || 1;  // the board shown (boards/): frames are drawn and sent there
+  document.addEventListener("board", () => setTimeout(() => render(shown)));  // after the switch: count that board's
 
   const inMain = (x, y) => {  // window px -> main-space px (as point.js)
     const m = area.getBoundingClientRect();
@@ -94,7 +96,7 @@ export default async function (page) {
     const f = { x: parseInt(ghost.style.left), y: parseInt(ghost.style.top), width: parseInt(ghost.style.width), height: parseInt(ghost.style.height) };
     ghost.remove();
     start = ghost = null;
-    if (f.width >= 40 && f.height >= 30) { focusNew = true; page.send({ type: "frame_add", ...f }); }  // a click or a slip is not a frame
+    if (f.width >= 40 && f.height >= 30) { focusNew = true; page.send({ type: "frame_add", ...f, board: board() }); }  // a click or a slip is not a frame
   });
 
   const boxes = {};  // id -> its box on the page
@@ -103,7 +105,7 @@ export default async function (page) {
   document.addEventListener("erase", (e) => {  // the doodle eraser at {x, y}, main px: unsent frames under it go
     const p = e.detail;
     for (const [id, f] of Object.entries(shown)) {
-      if (f.sent || p.x < f.x || p.x > f.x + f.width || p.y < f.y || p.y > f.y + f.height) continue;
+      if (f.sent || (f.board ?? 1) !== board() || p.x < f.x || p.x > f.x + f.width || p.y < f.y || p.y > f.y + f.height) continue;
       delete shown[id];  // once, though the eraser keeps moving over it
       page.send({ type: "frame_remove", id });
     }
@@ -134,13 +136,14 @@ export default async function (page) {
         newest = box;
       }
       put(box, f);
+      box.dataset.board = f.board ?? 1;  // boards/ shows it on its board
       box.classList.toggle("sent", f.sent);
       const text = box.querySelector("textarea");
       text.readOnly = f.sent;
       if (document.activeElement !== text) text.value = f.text;
     }
     if (focusNew && newest) { focusNew = false; newest.querySelector("textarea").focus(); }
-    ready = Object.values(frames).filter((f) => !f.sent && f.text.trim()).length;
+    ready = Object.values(frames).filter((f) => !f.sent && f.text.trim() && (f.board ?? 1) === board()).length;
     showReady();
     send.title = `Implement: send ${ready} frame${ready > 1 ? "s" : ""} to the agent to build, together`;
   }

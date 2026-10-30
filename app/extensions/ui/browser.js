@@ -125,6 +125,7 @@ export default async function (page) {
     }
     drawLabel(s, id);
     s.box.dataset.owner = s.owner;  // who a note on this surface goes to (point.js)
+    s.box.dataset.board = s.board ?? 1;  // its board: boards/browser.js shows it there
     s.box.querySelector(".surface-resize").hidden = s.resizable === false;
     s.box.toggleAttribute("data-pinned", !!s.pinned);
     s.box.toggleAttribute("data-flipped", !!s.flipped);

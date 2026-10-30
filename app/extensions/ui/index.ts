@@ -172,6 +172,8 @@ export default function (pi: ExtensionAPI) {
       about: Type.Optional(Type.String({ description: "what it is for and why it is built this way (its back side)" })),
       options: Type.Optional(Type.Array(Type.Record(Type.String(), Type.Any()), { description: 'alternatives instead of components: [{"label", "components", "data"}]' })),
       made_from: Type.Optional(Type.Array(Type.String())), instruction: Type.Optional(Type.String()),
+      board: Type.Optional(Type.Union([Type.Number(), Type.Literal("new")], { description:
+        'a board number, or "new" for a new board; leave out: where the surface is, else the board the user is on' })),
     }),
     async execute(_id, a) {
       const agent = pi.getSessionName() ?? "agent";
@@ -183,7 +185,9 @@ export default function (pi: ExtensionAPI) {
         const errors = problems(o.components, a.made_from);
         if (errors.length) return result("error: " + (o.label ? `${o.label}: ` : "") + errors.join("; "));
       }
-      const old = ui.surfaces[a.surface] ?? {}, catalog = readCatalog();
+      const old = ui.surfaces[a.surface] ?? {}, catalog = readCatalog(), boards = host.api.boards;
+      if (typeof a.board === "number" && boards && !boards.has(a.board))
+        return result(`error: no board ${a.board}. Boards: ${boards.list().join(", ")} (or board "new")`);
       const first = options[0] ?? { components: a.components, data: a.data ?? {} };
       const record: any = { owner: agent, components: first.components, data: first.data, place: a.place ?? old.place ?? null,
         draggable: a.draggable ?? true, resizable: a.resizable ?? true, about: a.about ?? old.about ?? "",
@@ -191,9 +195,12 @@ export default function (pi: ExtensionAPI) {
           .map((c: any) => [c.component, catalog[c.component].about?.version ?? 1])) };
       for (const [k, v] of [["made_from", a.made_from ?? old.made_from], ["instruction", a.instruction ?? old.instruction],
                             ["options", options.length ? options : null]] as const) if (v) record[k] = v;
+      // its board (boards/): the one asked for, a new one, where it already is, or the one the user is on
+      if (boards) record.board = a.board === "new" ? boards.add() : a.board ?? old.board ?? boards.current();
       ui.change(a.surface, record, agent, `${agent} drew ${a.surface}` + (options.length ? ` (${options.length} options)` : ""));
-      return result(options.length ? `surface '${a.surface}' shows ${options.length} options; the user flips through them and keeps one`
-        : `surface '${a.surface}' is on screen`);
+      const where = boards ? `on board ${record.board}${a.board === "new" ? " (a new board)" : ""}` : "on screen";
+      return result(options.length ? `surface '${a.surface}' shows ${options.length} options ${where}; the user flips through them and keeps one`
+        : `surface '${a.surface}' is ${where}`);
     },
   });
 
@@ -252,6 +259,9 @@ export default function (pi: ExtensionAPI) {
     else if (type === "ui_move") {
       if (r.pinned) return host.broadcast("ui", { op: "render", surface: sid, ...r });
       r.place = msg.place; ui.change(sid, r, "user", `you moved ${sid}`);
+    } else if (type === "ui_board" && host.api.boards?.has(msg.board)) {  // dropped on another board's thumbnail
+      if (r.pinned) return host.broadcast("ui", { op: "render", surface: sid, ...r });
+      r.board = msg.board; r.place = msg.place ?? null; ui.change(sid, r, "user", `you moved ${sid} to board ${msg.board}`);
     } else if (type === "ui_set") { setPath(r.data, msg.path ?? "/", msg.value); ui.change(sid, r, "user", `you changed ${msg.path} in ${sid}`); }
     else if (type === "ui_prop") {
       for (const c of r.components) if (c.id === msg.component && !["id", "component", "children", "child"].includes(msg.prop)) c[msg.prop] = msg.value;

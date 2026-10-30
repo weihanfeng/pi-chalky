@@ -30,7 +30,7 @@ function message(msg: any) {
   steps.forEach((st, i) => {
     const has = shots.includes(st.shot), a = st.area;
     if (has) n++;
-    lines.push(`Step ${i + 1}` + (has ? ` (picture ${n})` : " (no picture)")
+    lines.push(`Step ${i + 1}` + (st.board ? ` on board ${st.board}` : "") + (has ? ` (picture ${n})` : " (no picture)")
       + (has && a ? `, showing x=${a.x} y=${a.y} w=${a.width} h=${a.height} of the page` : "")
       + (st.drawn ? "" : ": nothing drawn, how the screen looked after those clicks"));
     for (const w of st.words ?? []) lines.push(`  words: "${w}"`);

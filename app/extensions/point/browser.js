@@ -209,14 +209,16 @@ export default async function (page) {
     const text = input.value.trim() || current?.suggestion;
     if (e.key !== "Enter" || !text || !current) return;
     const { suggestion, ...note } = current;
-    page.send({ ...note, text, to: note.to || document.getElementById("to")?.value });  // else the agent picked in the chat
+    page.send({ ...note, text, to: note.to || document.getElementById("to")?.value,  // else the agent picked in the chat
+                board: Number(document.body.dataset.board) || 1 });  // the board shown (boards/): what it points at is on it
     setOn(false);
   };
 
   const pins = {};  // note id -> pin element: its label, and its drawing if it has one
-  function pin({ id, text, to, x, y, stroke }) {  // stays where the note was written (doesn't follow scrolling yet)
+  function pin({ id, text, to, x, y, stroke, board }) {  // stays where the note was written (doesn't follow scrolling yet)
     if (pins[id]) return;
     const el = (pins[id] = document.createElement("div"));
+    el.dataset.board = board ?? 1;  // shown only on its board (boards/)
     el.style.cssText = "position:fixed;inset:0;z-index:9997;pointer-events:none;transition:opacity 1.5s";
     if (stroke) el.append(strokeSvg(stroke));
     const label = document.createElement("div");
