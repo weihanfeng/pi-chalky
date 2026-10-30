@@ -26,7 +26,6 @@ Then open http://127.0.0.1:3000.
 | `MODEL_BASE_URL` | the endpoint, up to `/v1` |
 | `MODEL_API_KEY` | its key |
 | `MODEL_NAME` | the model (default: `default`) |
-| `MODEL_THINKING` | optional thinking level: `minimal`, `low`, `medium`, `high` |
 | `CHALKY_HOME` | where Chalky keeps its things (default: `~/.chalky`) |
 | `UI_HOST` | the address to serve on (default: `127.0.0.1`, this machine only) |
 | `PORT` | the port to serve on (default: `3000`) |

@@ -6,7 +6,7 @@
 //   - hands each agent's pi events to the extensions that asked (host.eventHandlers), and tells them when a page
 //     opens (host.connectHandlers). The page extension turns pi's messages into the page's and replays them.
 // Extensions reach the host through globalThis.chalky (pi loads them with jiti, so they don't share our imports).
-// Run: MODEL_BASE_URL=... MODEL_API_KEY=... [MODEL_NAME=...] [MODEL_THINKING=...] node server.ts   (Node >= 22.19: it runs the TypeScript as is)
+// Run: MODEL_BASE_URL=... MODEL_API_KEY=... [MODEL_NAME=...] node server.ts   (Node >= 22.19: it runs the TypeScript as is)
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import http from "node:http";
@@ -119,9 +119,9 @@ const host = {
     if (old) { old.unsubscribe(); old.session.dispose(); }
     const dir = path.join(STATE, "sessions", name);
     fs.mkdirSync(dir, { recursive: true });
-    // projectTrusted false: pi ignores workspace/.pi/ (its SYSTEM.md, extensions, skills, settings), so an agent's
-    // project files can't change it; app/ (versioned) is the only place
-    const settingsManager = SettingsManager.inMemory({}, { projectTrusted: false });
+    // pi's settings: app/settings.json (e.g. compaction). projectTrusted false: pi ignores workspace/.pi/ (its
+    // SYSTEM.md, extensions, skills, settings), so an agent's project files can't change it; app/ (versioned) is the only place
+    const settingsManager = SettingsManager.create(WORK, APP, { projectTrusted: false });
     // agentDir = app/: pi finds app/extensions/<name>/index.ts and app/skills/* itself, again on every reload
     // pi's MCP (the CLI's built-in extensions, which SDK sessions don't load): the servers in app/mcp.json, with
     // codemode and tool_search for servers whose tools aren't direct. Sign-ins: app/mcp-auth.json (not versioned).
@@ -136,6 +136,7 @@ const host = {
       sessionManager: fresh ? SessionManager.create(WORK, dir) : SessionManager.continueRecent(WORK, dir),
     });
     if (session.sessionName !== name) session.setSessionName(name);
+    const empty = session.sessionManager.buildSessionContext().messages.length === 0;
     // starts the extensions' session (session_start). onError, besides showing extensions' errors: pi 1.4.0's reload()
     // sends session_start again only to a session with a binding, and without it pi's MCP doesn't reconnect after a reload
     await session.bindExtensions({ onError: (e) => {
@@ -144,9 +145,10 @@ const host = {
     } });
     const model = session.modelRuntime.getModel("chalky", process.env.MODEL_NAME || "default");
     if (model) await session.setModel(model);
-    // MODEL_THINKING: pi's thinking level (minimal, low, medium, high, ...), sent as reasoning_effort. Unset: none is
-    // sent and the model uses its own default (pi then says "off", but the model may still think).
-    if (process.env.MODEL_THINKING) session.setThinkingLevel(process.env.MODEL_THINKING);
+    // thinking level: the agent's own (the /thinking command), which pi keeps in its session file; an empty
+    // conversation starts at "medium". Set here: pi restores it only when it knows the model then, and ours (the
+    // model extension) comes later, so pi would say "off"
+    session.setThinkingLevel(empty ? "medium" : session.sessionManager.buildSessionContext().thinkingLevel);
     const a: Agent = { name, role, app, session, unsubscribe: () => {} };
     host.agents.set(name, a);
     a.unsubscribe = session.subscribe((ev: any) => {

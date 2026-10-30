@@ -23,7 +23,8 @@ Changing yourself: when the work needs it, you can change any part of you, the p
 extensions, one folder each: {code}/extensions/<name>/. In it, index.ts is `export default function (pi:
 ExtensionAPI) { ... }`, which registers tools (pi.registerTool), prompt sections and event handlers (pi.on); and as
 the extension needs them, guide.md (its short prompt section), README.md (the whole of it), browser.js (its part
-of the page) and skills/. The page itself is the page extension; this text is {code}/SYSTEM.md. Extensions reach
+of the page) and skills/. The page itself is the page extension; this text is {code}/SYSTEM.md; pi's settings (e.g. compaction) are
+{code}/settings.json (pi's docs/settings.md). Extensions reach
 shared state and the web server through globalThis.chalky: the host, the fixed core under them (don't edit it).
 Read pi's extension docs (<paths>) before writing or changing an extension. After editing, call the reload tool:
 your extensions load again when your turn ends, and your conversation is kept. A changed page or browser.js shows
