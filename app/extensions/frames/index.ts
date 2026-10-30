@@ -41,6 +41,13 @@ export default function (pi: ExtensionAPI) {
     host.api.ui?.watch("frames", (sid: string) => {
       if (frames[sid] && host.shared.get("ui")?.surfaces[sid]) { delete frames[sid]; changed(); }
     });
+    host.api.boards?.onRemove("frames", (n: number) => {  // a removed board (boards/) takes its frames with it
+      const ids = Object.keys(frames).filter((id) => (frames[id].board ?? 1) === n);
+      const gone = ids.map((id) => ({ owner: frames[id].sent ? frames[id].to : undefined, what: `frame ${id}` }));
+      for (const id of ids) delete frames[id];
+      if (ids.length) changed();
+      return gone;
+    });
   });
 
   host.routes.set("/frames", (_req: any, res: any) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(frames)));

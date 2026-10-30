@@ -149,6 +149,16 @@ export default function (pi: ExtensionAPI) {
     .replace("README.md", path.join(import.meta.dirname, "README.md"));
   pi.on("before_agent_start", (event) => { event.systemPromptOptions.sections.ui = guide; });
   pi.on("resources_discover", () => ({ skillPaths: [path.join(import.meta.dirname, "skills")] }));
+  // a removed board (boards/) takes its surfaces with it: one step in the history (undo brings them back)
+  pi.on("session_start", () => host.api.boards?.onRemove("ui", (n: number) => {
+    const sids = Object.keys(ui.surfaces).filter((sid) => (ui.surfaces[sid].board ?? 1) === n);
+    const gone = sids.map((sid) => ({ owner: ui.surfaces[sid].owner, what: `surface ${sid}` }));
+    sids.forEach((sid, i) => {
+      ui.copyIntoUsers(sid);  // surfaces elsewhere reading from it keep its values
+      ui.change(sid, null, "user", i === sids.length - 1 ? `you removed board ${n} (${sids.join(", ")})` : undefined);
+    });
+    return gone;
+  }));
 
   pi.registerTool({
     name: "ui_catalog", label: "UI catalog", description: "List the UI components you can use in surfaces, with their props.",

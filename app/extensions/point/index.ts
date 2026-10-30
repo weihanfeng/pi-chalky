@@ -43,6 +43,19 @@ export default function (pi: ExtensionAPI) {
   const guide = fs.readFileSync(path.join(import.meta.dirname, "guide.md"), "utf8")  // short; README.md: the whole of it, read when it says
     .replace("README.md", path.join(import.meta.dirname, "README.md"));
   pi.on("before_agent_start", (event) => { event.systemPromptOptions.sections.point = guide; });
+  // a removed board (boards/) takes its open notes with it; a note its agent hasn't seen yet is just taken back
+  pi.on("session_start", () => host.api.boards?.onRemove("point", (n: number) => {
+    const gone: { owner: string; what: string }[] = [];
+    for (const id of Object.keys(notes.open).filter((id) => (notes.open[id].board ?? 1) === n)) {
+      const note = notes.open[id], item = items.get(id);
+      delete notes.open[id];
+      items.delete(id);
+      host.broadcast("point_done", { id });
+      if (!(item && host.api.swarm?.withdraw(item))) gone.push({ owner: note.to, what: `note ${id} ("${note.text}")` });
+    }
+    save();
+    return gone;
+  }));
 
   pi.registerTool({
     name: "note_done", label: "Note done", description: "Mark a note the user pinned on the UI as dealt with; its pin fades.",

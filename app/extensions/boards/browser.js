@@ -21,7 +21,13 @@ const CSS = `
     gap: 8px; padding: 5px 8px; border-radius: 14px; border: 1px solid transparent; transition: background 0.15s; }
   .boards-shelf.open { background: var(--glass); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
     border-color: var(--edge); box-shadow: var(--shadow); }
-  .boards-shelf .slot { display: grid; justify-items: center; gap: 4px; padding: 0; }
+  .boards-shelf .slot { position: relative; display: grid; justify-items: center; gap: 4px; padding: 0; }
+  .boards-shelf .slot .x { display: none; position: absolute; top: 3px; right: 3px; width: 16px; height: 16px; border-radius: 50%;
+    font-size: 9px; line-height: 16px; text-align: center; color: var(--danger); background: var(--glass-strong); box-shadow: var(--shadow); }
+  .boards-shelf.open .slot:hover .x { display: block; }
+  .boards-toast { position: fixed; left: 50%; top: 76px; transform: translateX(-50%);  /* under the palette: clear of the shelf */ z-index: 27; display: flex; gap: 12px;
+    align-items: center; padding: 7px 14px; border-radius: 10px; background: rgba(29, 29, 31, 0.88); color: #fff; font-size: 13px; }
+  .boards-toast button { color: #9cc3f5; font-weight: 600; }
   .boards-shelf .dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(0, 0, 0, 0.22); transition: all 0.15s; }
   .boards-shelf .slot.on .dot { width: 11px; height: 11px; background: var(--text); }
   /* more boards than fit (fit(): clear of the chat panel): the thumbnails scroll inside .view, between ‹ and › */
@@ -145,13 +151,15 @@ export default async function (page) {
   }
 
   function render() {
-    track.replaceChildren(...boards.map((n) => {
+    const shown = boards.filter((n) => n !== pending?.n);
+    track.replaceChildren(...shown.map((n) => {
       const slot = document.createElement("button");
       slot.className = "slot" + (n === current ? " on" : "");
       slot.dataset.n = n;
       slot.title = `Board ${n}`;
-      slot.innerHTML = `<span class="mini"></span><span class="dot"></span><span class="n">${n}</span>`;
-      slot.onclick = () => show(n);
+      slot.innerHTML = `<span class="mini"></span><span class="dot"></span><span class="n">${n}</span>` +
+        (shown.length > 1 ? `<span class="x" role="button" title="Remove board ${n} and everything on it">✕</span>` : "");  // the last board stays
+      slot.onclick = (e) => (e.target.closest(".x") ? removeBoard(n) : show(n));
       slot.onmouseenter = () => showPeek(slot);
       slot.onmouseleave = () => { peek.hidden = true; };  // off it (onto +, a gap): no preview
       return slot;
@@ -159,6 +167,37 @@ export default async function (page) {
     if (shelf.classList.contains("open")) { thumbnails(); fit(); reveal(); }
     else fit();
   }
+
+  // ✕ on a thumbnail: the board leaves the shelf with a few seconds of Undo, and only then goes from the server
+  // (board_remove: its things go with it). Leaving the page in those seconds removes it at once.
+  let pending = null;  // {n, was: the board shown when ✕ was clicked, timer}
+  const toast = Object.assign(document.createElement("div"), { className: "boards-toast", hidden: true });
+  document.body.append(toast);
+  function removeBoard(n) {
+    if (pending) commit();
+    const i = boards.indexOf(n);
+    pending = { n, was: current, timer: setTimeout(commit, 5000) };
+    peek.hidden = true;
+    if (current === n) show(boards.filter((b) => b !== n)[Math.max(0, i - 1)]);  // the one before it (else after)
+    else render();
+    toast.replaceChildren(`Board ${n} removed`, button("", "Undo", "Bring it back", undo));
+    toast.hidden = false;
+  }
+  function commit() {
+    clearTimeout(pending.timer);
+    page.send({ type: "board_remove", board: pending.n });
+    pending = null;
+    toast.hidden = true;
+  }
+  function undo() {
+    clearTimeout(pending.timer);
+    const { n, was } = pending;
+    pending = null;
+    toast.hidden = true;
+    if (was === n) show(n);
+    else render();
+  }
+  addEventListener("pagehide", () => { if (pending) commit(); });
 
   function thumbnails() {
     for (const slot of shelf.querySelectorAll(".slot")) drawBoard(slot.querySelector(".mini"), Number(slot.dataset.n), 120, 68);
@@ -304,6 +343,11 @@ export default async function (page) {
 
   page.on("boards", (ev) => {
     boards = ev.boards;
+    if (ev.removed) {  // its things went with it (their own events); its container goes now
+      containers[ev.removed]?.remove();
+      delete containers[ev.removed];
+      if (!boards.includes(current)) return show(boards[0]);  // another page removed the board this one shows
+    }
     if (ev.added && ev.by === "user" && adding) { adding = false; return show(ev.added); }  // the + clicked here: go there
     render();
   });

@@ -6,8 +6,9 @@
 // The board the user is looking at is the page's to say (in memory; board 1 until it does). browser.js: the shelf.
 // Tool boards(board?): the boards and what is on each, and the board the user is on. Others use host.api.boards:
 //   list() -> [numbers]   has(n)   add(by?) -> the new number   current() -> the user's board
-//   GET /boards  {boards, current}      page messages  board_view {board}, board_add
-//   event "boards"  {boards, added, by}: a board was added (by "user": that page goes there)
+//   onRemove(name, fn)    remove(n): see below
+//   GET /boards  {boards, current}      page messages  board_view {board}, board_add, board_remove {board}
+//   event "boards"  {boards, added, by}: a board was added (by "user": that page goes there); {boards, removed}
 import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -30,7 +31,31 @@ host.api.boards = {
     return saved.last;
   },
   current: () => (read().boards.includes(view.current) ? view.current : read().boards[0]),
+  // Removing a board (the user's ✕, after its few seconds of Undo on the page): each extension takes its own things
+  // off it (onRemove(name, fn): fn(n) deletes them and returns [{owner, what}], e.g. {owner: "agent2", what:
+  // "surface prices"}; name: the extension's, so its reload replaces its own). Each agent that owned something gets
+  // one fyi (no turn of its own: it reads it on its next one). The last board stays.
+  onRemove: (name: string, fn: (n: number) => { owner?: string; what: string }[]) => removers.set(name, fn),
+  remove(n: number) {
+    const saved = read();
+    if (!saved.boards.includes(n) || saved.boards.length === 1) return;
+    const gone: { owner?: string; what: string }[] = [];
+    for (const [name, fn] of removers) {
+      try { gone.push(...fn(n)); }
+      catch (e) { host.broadcast("error", { agent: "server", text: `board ${n} removal, ${name}: ${e}` }); }
+    }
+    saved.boards = saved.boards.filter((b: number) => b !== n);
+    fs.writeFileSync(FILE, JSON.stringify(saved));
+    host.broadcast("boards", { boards: saved.boards, removed: n });
+    const byOwner = new Map<string, string[]>();
+    for (const g of gone) if (g.owner && host.agents.has(g.owner)) byOwner.set(g.owner, [...(byOwner.get(g.owner) ?? []), g.what]);
+    for (const [owner, things] of byOwner)
+      host.api.swarm?.fyi("user", owner, `[board removed] The user removed board ${n}; your ${things.join(", ")} went with it.`);
+  },
 };
+// on the host, so they outlive this file's reloads (as ui's watchers)
+const removers: Map<string, (n: number) => { owner?: string; what: string }[]> = host.shared.get("board-removers") ?? new Map();
+host.shared.set("board-removers", removers);
 
 const result = (text: string) => ({ content: [{ type: "text" as const, text }], details: undefined });
 
@@ -68,5 +93,6 @@ export default function (pi: ExtensionAPI) {
   host.pageHandlers.set("boards", (msg: any) => {
     if (msg.type === "board_view" && host.api.boards.has(Number(msg.board))) view.current = Number(msg.board);
     else if (msg.type === "board_add") host.api.boards.add("user");
+    else if (msg.type === "board_remove") host.api.boards.remove(Number(msg.board));
   });
 }
