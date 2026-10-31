@@ -7,6 +7,7 @@
 //     opens (host.connectHandlers). The page extension turns pi's messages into the page's and replays them.
 // Extensions reach the host through globalThis.chalky (pi loads them with jiti, so they don't share our imports).
 // Run: MODEL_BASE_URL=... MODEL_API_KEY=... [MODEL_NAME=...] node server.ts   (Node >= 22.19: it runs the TypeScript as is)
+//      CHALKY_LOGIN=off: no /login, /logout, /model on the page; agents always use MODEL_BASE_URL (a cloud deployment)
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import http from "node:http";
@@ -143,7 +144,10 @@ const host = {
       console.error(`${name}: extension ${e.extensionPath} (${e.event}): ${e.error}`);
       emit("error", { agent: name, text: `extension ${e.extensionPath} (${e.event}): ${e.error}` });
     } });
-    const model = session.modelRuntime.getModel("chalky", process.env.MODEL_NAME || "default");
+    // the model: the one picked with /login or /model (extensions/login), else the MODEL_BASE_URL endpoint (extensions/model).
+    // CHALKY_LOGIN=off (a cloud deployment, the backend's endpoint): always that endpoint, whatever an extension says
+    const picked = process.env.CHALKY_LOGIN === "off" ? undefined : host.api.login?.modelFor(name, session);
+    const model = picked ?? session.modelRuntime.getModel("chalky", process.env.MODEL_NAME || "default");
     if (model) await session.setModel(model);
     // thinking level: the agent's own (the /thinking command), which pi keeps in its session file; an empty
     // conversation starts at "medium". Set here: pi restores it only when it knows the model then, and ours (the

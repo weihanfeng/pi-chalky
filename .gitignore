@@ -10,6 +10,7 @@ workspace/
 # What the agents build while running (a fresh install starts with none)
 app/ui/surfaces.json
 app/ui/boards.json
+app/models.json
 app/ui/apps/*
 !app/ui/apps/.keep
 
