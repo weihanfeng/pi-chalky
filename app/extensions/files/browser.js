@@ -6,6 +6,9 @@
 //   A row dragged out of the panel onto the page: the same event, with that file.
 //   A click on a row, or files dropped from the computer (the first of them): a "file-open" DOM event
 //   {file, row} (the viewer plugin opens a preview window attached to the row; rows carry data-path).
+//   Each row's checkbox (on hover, or on all rows once one is ticked) selects it; the bar then deletes the ticked
+//   files for good, after a confirm (POST /files/delete). The bar sits below the rows (sticky), so ticking one never
+//   moves the rows.
 // The list comes from GET /files, then from "files" events (after an upload, and after each agent turn).
 export default async function (page) {
   const side = page.slot("side");
@@ -22,8 +25,23 @@ export default async function (page) {
                    border: 1px solid var(--edge); box-shadow: var(--shadow); }
     #side[data-open] .files { display: block; }
     #side[data-over] .files { outline: 2px solid var(--accent); outline-offset: -2px; }
-    #side .files-row { padding: 5px 8px; border-radius: 8px; color: var(--soft); cursor: grab;
-                       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #side .files-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 8px; color: var(--soft); cursor: grab; }
+    #side .files-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #side .files-row input { appearance: none; -webkit-appearance: none; margin: 0; flex: none; visibility: hidden;
+                             width: 16px; height: 16px; border-radius: 50%; cursor: pointer; background: var(--glass-strong);
+                             box-shadow: inset 0 0 0 1px rgba(60, 60, 67, .3); transition: background-color .15s, box-shadow .15s; }
+    #side .files-row input:hover { box-shadow: inset 0 0 0 1px var(--accent); }
+    #side .files-row input:checked { box-shadow: none; background: var(--accent) center / 10px no-repeat
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+    #side .files-row input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    #side .files-row:hover input, #side .files[data-selecting] .files-row input { visibility: visible; }
+    #side .files-bar { display: flex; gap: 6px; position: sticky; bottom: -8px; margin: 4px -8px -8px; padding: 8px;
+                       background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+                       border-top: 1px solid var(--line); }
+    #side .files-bar[hidden] { display: none; }
+    #side .files-bar button { font: inherit; color: var(--text); background: var(--glass-strong); border: 1px solid var(--line);
+                              border-radius: 8px; padding: 3px 10px; cursor: pointer; }
+    #side .files-bar .delete { color: #fff; background: var(--danger); border-color: transparent; }
     #side .files-row:hover, #side .files-row.viewing { background: var(--hover); color: var(--text); }`;
   document.head.append(style);
 
@@ -44,18 +62,46 @@ export default async function (page) {
   setOpen(open);
   toggle.onclick = () => setOpen(!side.hasAttribute("data-open"));
 
+  const selected = new Set();  // names ticked for deleting
+  const bar = Object.assign(document.createElement("div"), { className: "files-bar", hidden: true });  // under the rows
+  const del = Object.assign(document.createElement("button"), { className: "delete" });
+  const cancel = Object.assign(document.createElement("button"), { textContent: "Cancel" });
+  bar.append(del, cancel);
+  const showBar = () => {
+    bar.hidden = !selected.size;
+    list.toggleAttribute("data-selecting", selected.size > 0);
+    del.textContent = `Delete ${selected.size} file${selected.size === 1 ? "" : "s"}`;
+  };
+  cancel.onclick = () => { selected.clear(); list.querySelectorAll(".files-row input").forEach((t) => (t.checked = false)); showBar(); };
+  del.onclick = async () => {
+    const names = [...selected];
+    if (!confirm(`Delete ${names.length === 1 ? names[0] : `${names.length} files`} for good?`)) return;
+    try {
+      const out = await (await fetch("/files/delete", { method: "POST", body: JSON.stringify({ names }) })).json();
+      if (out.errors.length) page.note(`Could not delete: ${out.errors.join("; ")}`);
+    } catch (err) { page.note(`Could not delete: ${err}`); }
+    selected.clear();
+    showBar();  // the rows go with the "files" event
+  };
+
   const ROW = "application/x-chalky-file";  // a row being dragged: its file as JSON
   function render(files) {
     list.replaceChildren();
     side.hidden = !files.length;  // no files yet: no panel (a drop from the computer still works anywhere)
+    for (const name of selected) if (!files.some((f) => f.name === name)) selected.delete(name);
+    showBar();
     for (const f of files) {
-      const row = Object.assign(document.createElement("div"), { className: "files-row", textContent: f.name, draggable: true });
+      const row = Object.assign(document.createElement("div"), { className: "files-row", draggable: true });
+      const tick = Object.assign(document.createElement("input"), { type: "checkbox", checked: selected.has(f.name), title: "Select to delete" });
+      tick.onclick = (e) => { e.stopPropagation(); tick.checked ? selected.add(f.name) : selected.delete(f.name); showBar(); };
+      row.append(tick, Object.assign(document.createElement("span"), { textContent: f.name }));
       row.title = `${f.path} · ${Math.ceil(f.size / 1024)} KB · click to preview`;
       row.dataset.path = f.path;
       row.onclick = () => opened(f);  // a drag never ends in a click, so dragging a row still works
       row.ondragstart = (e) => { e.dataTransfer.setData(ROW, JSON.stringify(f)); e.dataTransfer.effectAllowed = "copy"; };
       list.append(row);
     }
+    list.append(bar);
   }
   page.on("files", ({ files }) => render(files));
   try { render(await (await fetch("/files")).json()); } catch { render([]); }

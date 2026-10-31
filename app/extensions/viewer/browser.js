@@ -103,7 +103,7 @@ export default async function (page) {
   document.addEventListener("scroll", placeAll, true);  // the panel's list scrolls
   const side = document.getElementById("side");
   if (side) new MutationObserver(() => {  // the list redrawn or the panel opened or closed
-    for (const w of Object.values(windows)) if (!rowOf(w.file.path) && w.attached && side.querySelector(".files-row")) close(w);  // file gone
+    for (const w of Object.values(windows)) if (!rowOf(w.file.path) && w.attached) close(w);  // file gone (deleted too)
     placeAll();
   }).observe(side, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-open", "hidden"] });
 

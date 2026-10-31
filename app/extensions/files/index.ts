@@ -6,6 +6,7 @@
 // sent again when an agent's turn is over: pi's agent_settled).
 //   POST /files/upload?name=<file name>  the file's bytes: saved in DIR (a safe, new name), returns {path, size}
 //   GET  /files                          [{name, path, size}], newest first; files in folders too ("q3/costs.xlsx")
+//   POST /files/delete                   {names: [...]} (names as listed): deleted for good, returns {deleted, errors}
 //   event "files" {files: [...]}         to every open page, when the list changed
 // guide.md (copied from files.py, short enough to be whole) names pi's read tool for pictures (Python: view_image).
 import fs from "node:fs";
@@ -28,9 +29,9 @@ function listing() {  // the files in DIR and its folders (not hidden ones), new
     .map(({ name, path, size }) => ({ name, path, size }));
 }
 
-function changed() {  // tell the pages, if the list is not what they were last sent
+function changed(always = false) {  // tell the pages, if the list is not what they were last sent (or always)
   const now = JSON.stringify(listing());
-  if (now === host.shared.get("files-last")) return;
+  if (now === host.shared.get("files-last") && !always) return;
   host.shared.set("files-last", now);
   host.broadcast("files", { files: JSON.parse(now) });
 }
@@ -42,6 +43,25 @@ export default function (pi: ExtensionAPI) {
   if (!host.shared.has("files-last")) host.shared.set("files-last", JSON.stringify(listing()));
 
   host.routes.set("/files", (_req: any, res: any) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(listing())));
+  host.routes.set("/files/delete", (req: any, res: any) => {  // delete files in DIR; a name may not lead outside it
+    if (req.method !== "POST") return res.writeHead(405).end();
+    let body = "";
+    req.on("data", (chunk: Buffer) => { body += chunk; });
+    req.on("end", () => {
+      const deleted: string[] = [], errors: string[] = [];
+      let names: string[] = [];
+      try { names = JSON.parse(body).names ?? []; } catch {}
+      for (const name of names) {
+        const p = path.resolve(DIR, String(name));
+        if (!p.startsWith(DIR + path.sep)) { errors.push(`${name}: not in the files folder`); continue; }
+        if (!fs.statSync(p, { throwIfNoEntry: false })?.isFile()) { errors.push(`${name}: no such file`); continue; }
+        fs.rmSync(p);
+        deleted.push(name);
+      }
+      changed(true);  // always: files added outside the panel may have made the last list sent stale
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ deleted, errors }));
+    });
+  });
   host.routes.set("/files/upload", (req: any, res: any) => {  // save one file in DIR (a new name if it exists)
     if (req.method !== "POST") return res.writeHead(405).end();
     const given = path.basename(new URL(req.url, "http://x").searchParams.get("name") ?? "file");
