@@ -16,7 +16,9 @@
 //                                    agent, put the files back, reload every agent's extensions (pi's reload), read
 //                                    the surfaces again, and tell each agent (an fyi: no turn).
 //   - Not ported: pip freeze (Python's library list per version).
-// Ignored (info/exclude in the history repo): pi's auth.json, models-store.json and mcp-auth.json (logins), node_modules/.
+// Ignored (info/exclude in the history repo): pi's auth.json, models.json, models-store.json and mcp-auth.json (logins and
+// endpoints: extensions/login writes them, not the agents), node_modules/. Never committed (a file tracked before it was
+// ignored stops being tracked), never put back or removed by a rollback.
 // Guard: app/ is the agents' code. If a commit includes other files, its agent is told to move them to the
 // workspace: a rollback would undo them.
 import fs from "node:fs";
@@ -29,7 +31,8 @@ const GIT_DIR = path.join(host.state, "versions.git");
 const SHOTS = path.join(host.state, "shots");
 const MAX_SHOT = 10 * 1024 * 1024;
 const CODE = ["extensions/", "skills/", "ui/", "SYSTEM.md", "mcp.json", "settings.json"];
-const IGNORE = ["auth.json", "models-store.json", "mcp-auth.json", "node_modules/"];
+const IGNORE = ["auth.json", "models.json", "models-store.json", "mcp-auth.json", "node_modules/"];
+const ignored = (p: string) => IGNORE.some((i) => i.endsWith("/") ? p.startsWith(i) : p === i);
 const repo = { fs, dir: host.app, gitdir: GIT_DIR };
 const who = (name: string) => ({ name, email: `${name}@chalky` });
 
@@ -45,6 +48,7 @@ async function stage() {  // git add -A: every change in app/ into the index; th
   const changed = [];
   for (const [filepath, head, workdir, index] of await git.statusMatrix(repo)) {
     if (head === 1 && workdir === 1 && index === 1) continue;  // unchanged
+    if (ignored(filepath)) { if (index !== 0) await git.remove({ ...repo, filepath }); continue; }  // tracked from before it was ignored: untrack
     // new files: statusMatrix (1.44.2) checks ignores without our gitdir, so it misses info/exclude; isIgnored doesn't
     if (head === 0 && index === 0 && await git.isIgnored({ ...repo, filepath })) continue;
     if (workdir === 0) { if (index !== 0) await git.remove({ ...repo, filepath }); }
@@ -142,8 +146,14 @@ export default function (pi: ExtensionAPI) {
     const files = await queued(async () => {
       await commit("user", "uncommitted changes before rollback");  // nothing is ever lost
       // that commit's files into app/ and the index, removing files it doesn't have; the branch stays where it is
+      // the ignored files (logins, endpoints) stay as they are now: an old commit may still have one (tracked before it was ignored)
+      const kept = IGNORE.filter((f) => !f.endsWith("/")).map((f) => [f, fs.existsSync(path.join(host.app, f)) ? fs.readFileSync(path.join(host.app, f)) : null] as const);
       await git.checkout({ ...repo, ref: sha, noUpdateHead: true, force: true });
-      const files = (await git.statusMatrix(repo)).filter(([, h, w, i]) => !(h === 1 && w === 1 && i === 1)).map(([f]) => f);
+      for (const [f, data] of kept) {
+        if (data === null) fs.rmSync(path.join(host.app, f), { force: true }); else fs.writeFileSync(path.join(host.app, f), data);
+        try { await git.remove({ ...repo, filepath: f }); } catch {}
+      }
+      const files = (await git.statusMatrix(repo)).filter(([f, h, w, i]) => !(h === 1 && w === 1 && i === 1) && !ignored(f)).map(([f]) => f);
       // git keeps files, not folders: a folder whose files the rollback removed stays, empty (an extension folder
       // without index.ts would show in the map). Remove those, up to the first one that isn't empty.
       for (const f of files) for (let d = path.dirname(f); d !== "."; d = path.dirname(d)) {
