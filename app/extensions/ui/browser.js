@@ -16,7 +16,8 @@
 // The corner resizes it (unless resizable: false). Moving or resizing one first pins every stacked surface
 // where it is (else the ones below would jump up).
 // Typing into a bound field changes the data at once and sends {type: "ui_set"} shortly after: saved, and
-// no agent is woken. Props can read other surfaces' data ({"ref", "path"}); those redraw when it changes.
+// no agent is woken; so does a click on a Button with set (ui.write). A component with
+// when: {"path", "is"} is hidden while that data is something else (tabs, steps, "show more"). Props can read other surfaces' data ({"ref", "path"}); those redraw when it changes.
 // Alternatives (options): drawn as a stack with a bar to flip through them; "Keep" sends {type: "ui_keep"}.
 // Components come from the page's catalog (page.load defines <ui-name>; see chat_ui.html); one saved with
 // an older version of its props goes through the component's upgrade(props, fromVersion) first.
@@ -24,7 +25,7 @@
 const get = (data, path) => path.split("/").filter(Boolean).reduce((o, k) => o?.[k], data);
 const isBinding = (v) => v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).join() === "path";
 const isRef = (v) => v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).sort().join() === "path,ref";
-const propsOf = (c) => Object.fromEntries(Object.entries(c).filter(([k]) => !["id", "component", "children", "child"].includes(k)));
+const propsOf = (c) => Object.fromEntries(Object.entries(c).filter(([k]) => !["id", "component", "children", "child", "when"].includes(k)));
 const refsIn = (s) => new Set(s.components.flatMap((c) => Object.values(propsOf(c)).filter(isRef).map((v) => v.ref)));
 const HOLD_MS = 550;  // hold the label this long, without moving, to pin or unpin
 const COMBINE_MS = 600;  // hold a dragged surface still over another this long to combine with it
@@ -33,6 +34,7 @@ const CSS = `
   [data-surface] { position: relative; display: flex; flex-direction: column; width: fit-content; max-width: 100%; margin: 0 0 20px; }
   [data-surface] > .surface-body { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: flex-start; }
   [data-surface] > .surface-body > * { max-width: 100%; }
+  [data-surface] > .surface-body [hidden] { display: none !important; }
   [data-surface][data-placed] > .surface-body { align-items: stretch; }
   [data-surface][data-placed] > .surface-body > * { flex: 1; min-height: 0; }
   [data-surface] > .surface-label { position: absolute; bottom: 100%; left: 0; z-index: 2; display: flex; gap: 8px; align-items: center;
@@ -167,11 +169,20 @@ export default async function (page) {
           if (!s.options) sendSet(id, c[prop].path, value);
           draw(id);
         },
+        data: shown.data,  // this surface's data, to read (write through set or write)
+        write(values) {  // {path: value, ...} into this surface's data: at once here, saved shortly after (ui_set)
+          for (const [path, value] of Object.entries(values)) {
+            setPath(shown.data, path, value);
+            if (!s.options) sendSet(id, path, value);
+          }
+          draw(id);
+        },
         action(name, context = {}) {
           const ctx = Object.fromEntries(Object.entries(context).map(([k, v]) => [k, resolve(v)]));
           page.send({ type: "ui_action", surface: id, component: cid, name, context: ctx, data: s.data });
         },
       });
+      node.hidden = !!c.when && get(shown.data, c.when.path) !== c.when.is;  // shown only while its data matches
       return node;
     };
     try {

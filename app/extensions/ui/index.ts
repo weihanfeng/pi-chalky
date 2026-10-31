@@ -28,7 +28,7 @@ const DATA = path.join(host.state, "ui-data.json");
 const read = (p: string, d: any) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : d);
 const clone = (v: any) => structuredClone(v);
 const isRef = (v: any) => v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).sort().join() === "path,ref";
-const propsOf = (c: any) => Object.fromEntries(Object.entries(c).filter(([k]) => !["id", "component", "children", "child"].includes(k)));
+const propsOf = (c: any) => Object.fromEntries(Object.entries(c).filter(([k]) => !["id", "component", "children", "child", "when"].includes(k)));
 
 function getPath(data: any, p: string) {
   for (const k of p.split("/").filter(Boolean)) data = data?.[Array.isArray(data) ? Number(k) : k];
@@ -110,6 +110,8 @@ function problems(components: any[], madeFrom: string[] = []) {
     if (!(c.component in catalog)) { errors.push(`${c.id}: unknown component '${c.component}' (have: ${Object.keys(catalog).join(", ")})`); continue; }
     for (const child of [...(c.children ?? []), ...(c.child ? [c.child] : [])])
       if (!ids.has(child)) errors.push(`${c.id}: child '${child}' is not defined`);
+    if (c.when && !(typeof c.when === "object" && typeof c.when.path === "string" && "is" in c.when))
+      errors.push(`${c.id}: when must be {"path": "/x", "is": value}`);
     const known = catalog[c.component].about?.props;
     for (const [k, v] of Object.entries(propsOf(c)) as any) {
       if (known && !(k in known)) errors.push(`${c.id}: ${c.component} has no prop '${k}' (props: ${Object.keys(known).join(", ") || "none"})`);

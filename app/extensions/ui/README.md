@@ -5,13 +5,20 @@ A surface shows only what you build, with no frame: when asked for a thing (a sm
 that thing. Add a background, border or Card only if the thing itself needs one. An app's page should keep
 a transparent background, so it sits on the workspace.
 Name what you build (a clear surface id, ids or data-name on elements): the user points at things by name.
-Compose from existing components; write a new component only if none fits.
+Build in layers, and climb only for the part that needs it:
+1. JSON blocks (ui_render): fast. Clicks and typing work on the page without you: Button set, when, bindings.
+2. A new component, for the one part blocks can't do (a chart, drag-to-sort); then use it from JSON.
+3. An App, only when it is really a separate program (a game, an editor).
+What the user clicks never needs a turn of yours: you see the result in the data when they next write.
 Before building or restyling what the user sees, load the ui-design skill (how it should look and read).
 - ui_catalog: lists the components and their props. Read it first.
 - ui_render(surface, components, data): draw or replace a surface. components is a flat list; each has
   "id", "component" (a catalog name), its props, and "children": [ids] or "child": id. One has id "root".
   A prop can be {"path": "/x"} to bind it to this surface's data (inputs write to it), or
   {"ref": "other-surface", "path": "/x"} to read another surface's data live (no copy: it follows changes).
+  Any component can have "when": {"path": "/x", "is": value}: hidden while the data there is something else.
+  Tabs: Buttons with "set": {"/tab": "today"} etc., and one block per tab with "when": {"path": "/tab", "is": ...};
+  start the data with the first tab ({"tab": "today"}).
   Errors come back to you; fix and retry.
 - about="...": one or two sentences on what the surface is for and why it is built this way. The user reads
   it on the surface's back side; you read it in {code}/ui/surfaces.json. Keep it true when you change things.
@@ -33,7 +40,8 @@ Before building or restyling what the user sees, load the ui-design skill (how i
 - ui_update(surface, path, value): change data only (fast; components keep their state). ui_delete(surface).
 - Data (what users typed, rows, scores) is kept in {data}/ui-data.json (not versioned); the rest of each
   surface in {code}/ui/surfaces.json. The user can undo any change (theirs or yours), so don't keep backups.
-- When the user clicks a Button you get "[ui action] <name> ..." with the surface's data.
+- A Button's click writes its set ({path: value}) into the surface's data on the page; you are not woken,
+  and you see the data in ui-data.json. A row of Buttons setting the same path works as tabs.
 - Voice input (dictation, meeting notes): import /ui/voice.js in the app (read its header), never the
   browser's speech API or a provider directly: it uses the sandbox's speech-to-text API, or the browser's.
 - A new component: {code}/extensions/ui/components/<Name>.js. Start with a comment line "// Name: what it does" (more
@@ -53,7 +61,9 @@ Before building or restyling what the user sees, load the ui-design skill (how i
   upgrade(props, fromVersion) returning props in the new shape.
   update() runs on every change, on the same element: keep internal state there (e.g. a game loop).
   ui.children: child elements, placed with ui.mount(container); ui.set(prop, value) writes a bound prop;
-  ui.action(name, context) sends an action to you. Make it general so it can be reused. New components work
+  ui.data is the surface's data and ui.write({path: value}) changes it (saved, you are not woken).
+  ui.action(name, context) sends an action to you and wakes you: only for what truly needs you
+  (e.g. "ask the agents"), never for clicks the page can handle. Make it general so it can be reused. New components work
   immediately; edited components and App files show when your turn ends (the page refreshes itself). Big multi-file apps: {code}/ui/apps/<name>/, shown with App.
   Pointing inside a canvas: give the element (or an App page's window) a partAt(x, y) function returning
   {"name", ...} for what is at that spot, so the user can point at parts (an enemy, a cell).
