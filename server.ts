@@ -1,8 +1,10 @@
 // Host: the fixed core under the agents. Everything else, the page included, is a pi extension in
-// app/extensions/<name>/ (agents can change those; this file they can't). This file only:
-//   - runs the web server: its WebSocket /ws, and every route extensions add (the page: extensions/page);
-//   - keeps one pi AgentSession per agent (session name = agent name; saved under state/sessions/<agent>);
-//   - serves /recover: going back to a working version when an agent broke the page (the safety net);
+// agent/extensions/<name>/ (agents can change those; this file they can't). This file only:
+//   - lays out the four places (agent/, built/, data/, workspace/) and moves an older layout into them once;
+//   - runs the web server: its WebSocket /ws, /built/ (what the agents made), and every route extensions add;
+//   - keeps one pi AgentSession per agent (session name = agent name; saved under data/sessions/<agent>);
+//   - keeps the rule for the version history (host.history) and serves /recover, going back to a working version
+//     when an agent broke the page (the safety net);
 //   - hands each agent's pi events to the extensions that asked (host.eventHandlers), and tells them when a page
 //     opens (host.connectHandlers). The page extension turns pi's messages into the page's and replays them.
 // Extensions reach the host through globalThis.chalky (pi loads them with jiti, so they don't share our imports).
@@ -17,42 +19,115 @@ import { createAgentSession, createCodemodeExtension, createMcpExtension, create
 import git from "isomorphic-git";
 import { WebSocketServer } from "ws";
 
-const ROOT = import.meta.dirname;                         // this package: server.ts and the starting app/
-// HOME: where this Chalky keeps its things. CHALKY_HOME (bin/chalky.mjs, an installed copy: ~/.chalky), else this folder
+const ROOT = import.meta.dirname;                         // this package: server.ts and the starting agent/
+// HOME: where this Chalky keeps its things. CHALKY_HOME (bin/chalky.mjs, an installed copy: ~/.chalky), else this folder.
+// Four places, one job each (the prompt gives them as {agent}, {built}, {data}, {workspace}):
 const HOME = process.env.CHALKY_HOME ? path.resolve(process.env.CHALKY_HOME) : ROOT;
-const APP = path.join(HOME, "app");                       // agent-editable, pi's agentDir: extensions/, skills/, ui/ (what they built)
-const STATE = path.join(HOME, "state");                   // conversations and data, not code
+const AGENT = path.join(HOME, "agent");                   // what the agents ARE, pi's agentDir: SYSTEM.md, settings, extensions/, skills/
+const BUILT = path.join(HOME, "built");                   // what they MADE for the user: card.json, board.json, apps/; served at /built/
+const DATA = path.join(HOME, "data");                     // what is kept while running: conversations, typed data, notes (not versioned)
+const WORKSPACE = path.join(HOME, "workspace");           // the agents' working folder (bash runs here); workspace/drops: the user's files
+// The version history covers agent/ and built/ together (a rollback puts both back), but not the logins and endpoints
+// (the model extension writes them, not the agents) or installed packages. Here, so /recover follows it too.
+const NOT_IN_HISTORY = ["agent/auth.json", "agent/models.json", "agent/models-store.json", "agent/mcp-auth.json"];
+const inHistory = (f: string) => /^(agent|built)\//.test(f) && !NOT_IN_HISTORY.includes(f) && !f.split("/").includes("node_modules");
+// What an agent is made of (paths in agent/). A new home starts with these from this package (no logins, nothing
+// built); anything else an agent puts in agent/ doesn't belong there (the version extension tells it so).
+const AGENT_PARTS = ["extensions/", "skills/", "SYSTEM.md", "mcp.json", "settings.json"];
+const isAgentPart = (rel: string) => !rel.split(path.sep).includes("node_modules")
+  && AGENT_PARTS.some((p) => (rel.replaceAll(path.sep, "/") + "/").startsWith(p) || rel === p);
+const startAgent = () => fs.cpSync(path.join(ROOT, "agent"), AGENT, { recursive: true,
+  filter: (src) => { const rel = path.relative(path.join(ROOT, "agent"), src); return !rel || isAgentPart(rel); } });
 // our dependencies' folder (npm may put it above this package)
 const MODULES = path.resolve(createRequire(import.meta.url).resolve("ws/package.json"), "../..");
-if (!fs.existsSync(APP)) fs.cpSync(path.join(ROOT, "app"), APP, { recursive: true });  // first run: the starting code
-if (HOME !== ROOT) {  // HOME/app's extensions import our dependencies: Node looks for a node_modules above them
+
+// The layout before 2026-11 (app/: the agent and what it built; state/: the data), moved once into the four places.
+// An old app/ (an installed home) gives up only the user's things: its code stays as app-before-reorg/, and agent/ is
+// this package's (the old code expects the old layout). The old version history stays too: its paths were app/'s.
+function migrate() {
+  const move = (from: string, to: string) => {
+    if (!fs.existsSync(from) || fs.existsSync(to)) return;
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.renameSync(from, to);
+    console.log(`moved ${path.relative(HOME, from)} -> ${path.relative(HOME, to)}`);
+  };
+  const old = path.join(HOME, "app");
+  if (fs.existsSync(old)) {
+    if (!fs.existsSync(AGENT)) startAgent();
+    for (const f of [...NOT_IN_HISTORY.map((f) => path.basename(f)), "mcp.json", "settings.json"])  // the user's, not code
+      if (fs.existsSync(path.join(old, f))) { fs.rmSync(path.join(AGENT, f), { force: true }); move(path.join(old, f), path.join(AGENT, f)); }
+  }
+  for (const ui of [path.join(old, "ui"), path.join(AGENT, "ui")]) {  // what they built: app/ui (installed), agent/ui (this repo)
+    const apps = path.join(ui, "apps");
+    if (fs.existsSync(apps)) for (const name of fs.readdirSync(apps)) if (name !== ".keep") move(path.join(apps, name), path.join(BUILT, "apps", name));
+    move(path.join(ui, "surfaces.json"), path.join(BUILT, "card.json"));
+    move(path.join(ui, "boards.json"), path.join(BUILT, "board.json"));
+    fs.rmSync(path.join(apps, ".keep"), { force: true });
+    for (const d of [apps, ui]) try { fs.rmdirSync(d); } catch {}
+  }
+  if (fs.existsSync(old)) move(old, path.join(HOME, "app-before-reorg"));
+  move(path.join(HOME, "state"), DATA);
+  for (const [from, to] of [["ui-data.json", "card.json"], ["ui-history.jsonl", "history.jsonl"], ["notes.json", "note.json"],
+    ["frames.json", "frame.json"], ["login.json", "model.json"], ["app-data", "app"], ["screens", "screen"], ["pointed", "viewer"],
+    ["shots", "version/shots"], ["versions.git", "version-before-reorg.git"]]) move(path.join(DATA, from), path.join(DATA, to));
+  // what was in them, in the new words: a card's "components" are its "blocks", each {"block": kind}; the Card block
+  // is Panel; a card that was one App block shows that app; the undo steps' "surfaces" are "cards"; apps use the new addresses
+  const blocks = (list: any[]) => list.map(({ component, ...b }: any) => ({ ...b, block: component === "Card" ? "Panel" : component }));
+  const content = ({ components, ...rest }: any) => components.length === 1 && components[0].component === "App"
+    ? { ...rest, app: `apps/${components[0].src}`, ...(components[0].height ? { height: components[0].height } : {}) }
+    : { ...rest, blocks: blocks(components) };
+  const card = (r: any) => {
+    if (!r.components) return r;
+    const out: any = content(r);
+    if (out.options) out.options = out.options.map((o: any) => o.components ? content(o) : o);
+    if (out.kinds) out.kinds = Object.fromEntries(Object.entries(out.kinds).filter(([k]) => k !== "App").map(([k, v]) => [k === "Card" ? "Panel" : k, v]));
+    return out;
+  };
+  const cards = (all: Record<string, any>) => Object.fromEntries(Object.entries(all).map(([id, r]) => [id, card(r)]));
+  const rewrite = (file: string, change: (text: string) => string) => {
+    const text = fs.readFileSync(file, "utf8"), now = change(text);
+    if (now !== text) { fs.writeFileSync(file, now); console.log(`updated ${path.relative(HOME, file)}`); }
+  };
+  if (fs.existsSync(path.join(BUILT, "card.json"))) rewrite(path.join(BUILT, "card.json"), (t) => t.includes('"components"') ? JSON.stringify(cards(JSON.parse(t)), null, 1) : t);
+  if (fs.existsSync(path.join(DATA, "history.jsonl"))) rewrite(path.join(DATA, "history.jsonl"), (t) => !t.includes('"surfaces"') ? t
+    : t.split("\n").map((l) => { if (!l) return l; const { surfaces, ...e } = JSON.parse(l); return JSON.stringify(surfaces ? { ...e, cards: cards(surfaces) } : e); }).join("\n"));
+  const apps = path.join(BUILT, "apps");
+  if (fs.existsSync(apps)) for (const f of fs.readdirSync(apps, { recursive: true }) as string[])
+    if (/\.(html|js|mjs)$/.test(f) && !f.split(path.sep).includes("node_modules")) rewrite(path.join(apps, f), (t) => t
+      .replaceAll("/ui/agents.js", "/app/agents.js").replaceAll("/ui/voice.js", "/voice/voice.js")
+      .replaceAll("/ui-api/app-data/", "/app/data/").replaceAll("/ui/apps/", "/built/apps/"));
+}
+migrate();
+if (!fs.existsSync(AGENT)) startAgent();  // first run: the starting agent
+if (HOME !== ROOT) {  // HOME/agent's extensions import our dependencies: Node looks for a node_modules above them
   const link = path.join(HOME, "node_modules");
   if (fs.lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()) fs.unlinkSync(link);  // again each start: the package may have moved
   if (fs.existsSync(link)) throw new Error(`${link} is in the way: Chalky links it to ${MODULES}`);
   fs.symlinkSync(MODULES, link, "junction");
 }
 // pi's agent folder for the code that doesn't take our agentDir but calls getAgentDir() (its MCP extension: mcp.json
-// and mcp-auth.json): the same app/
-process.env.PI_CODING_AGENT_DIR = APP;
-const WORK = path.join(HOME, "workspace");                // the agents' working folder (bash runs here)
+// and mcp-auth.json): the same agent/
+process.env.PI_CODING_AGENT_DIR = AGENT;
 const PORT = Number(process.env.PORT || 3000);            // the page's port
-for (const d of [STATE, WORK]) fs.mkdirSync(d, { recursive: true });
+for (const d of [path.join(BUILT, "apps"), DATA, WORKSPACE]) fs.mkdirSync(d, { recursive: true });
 
 type Agent = { name: string; role: string; app?: string; session: any; unsubscribe: () => void;
   stopped?: boolean };  // stopped: this run was stopped on purpose (host.abort)
 
 const sockets = new Set<any>();
 const host = {
-  root: ROOT, app: APP, state: STATE, work: WORK, modules: MODULES, port: PORT,
+  root: ROOT, home: HOME, agent: AGENT, built: BUILT, data: DATA, workspace: WORKSPACE, modules: MODULES, port: PORT,
+  inHistory,                                        // inHistory(path in HOME): whether the version history keeps that file
+  isAgentPart,                                      // isAgentPart(path in agent/): whether it is part of an agent
   agents: new Map<string, Agent>(),
   routes: new Map<string, (req: http.IncomingMessage, res: http.ServerResponse) => void>(),  // path -> handler (a path ending in /: also every path under it)
   pageHandlers: new Map<string, (msg: any) => void>(),  // one per extension (not per agent): key -> handler
   eventHandlers: new Map<string, (agent: string, ev: any) => void>(),  // every pi event of every agent (session.subscribe:
                                                     // also what pi.on misses, e.g. a message filed while idle); key -> handler
   connectHandlers: new Map<string, (send: (type: string, data: object) => void) => void>(),  // a page opened: what it gets first
-  shared: new Map<string, any>(),                   // state extensions share across agents (e.g. the surfaces)
+  shared: new Map<string, any>(),                   // state extensions share across agents (e.g. the cards)
   reloadAfterTurn: new Map<string, boolean>(),      // agents whose extensions load again when their turn ends -> quiet
-  api: {} as Record<string, any>,                   // services extensions offer by name (e.g. swarm); the newest load wins
+  api: {} as Record<string, any>,                   // services extensions offer by name (e.g. team); the newest load wins
   file,                                             // file(res, path): send a file (type from its extension; 404 if none)
 
   broadcast(type: string, data: object) {
@@ -60,14 +135,14 @@ const host = {
     for (const s of sockets) s.send(text);
   },
 
-  // Without the swarm extension: each agent idle or working, and messages go straight to a run
+  // Without the team extension: each agent idle or working, and messages go straight to a run
   status() {
-    if (host.api.swarm) return host.api.swarm.status();
+    if (host.api.team) return host.api.team.status();
     return Object.fromEntries([...host.agents.values()].map((a) => [a.name, { role: a.role, app: a.app ?? null,
       state: a.session.isStreaming ? "working" : "idle", doing: "", since: 0, queued: 0 }]));
   },
   send(from: string, to: string, text: string) {
-    if (host.api.swarm) return host.api.swarm.send(from, to, text);
+    if (host.api.team) return host.api.team.send(from, to, text);
     void host.prompt(to, `[message from ${from} · ${new Date().toTimeString().slice(0, 8)}]\n${text}`, from);
   },
 
@@ -118,23 +193,23 @@ const host = {
   async createAgent(name: string, role: string, app?: string, fresh = false) {
     const old = host.agents.get(name);
     if (old) { old.unsubscribe(); old.session.dispose(); }
-    const dir = path.join(STATE, "sessions", name);
+    const dir = path.join(DATA, "sessions", name);
     fs.mkdirSync(dir, { recursive: true });
     // pi's settings: app/settings.json (e.g. compaction). projectTrusted false: pi ignores workspace/.pi/ (its
     // SYSTEM.md, extensions, skills, settings), so an agent's project files can't change it; app/ (versioned) is the only place
-    const settingsManager = SettingsManager.create(WORK, APP, { projectTrusted: false });
+    const settingsManager = SettingsManager.create(WORKSPACE, AGENT, { projectTrusted: false });
     // agentDir = app/: pi finds app/extensions/<name>/index.ts and app/skills/* itself, again on every reload
     // pi's MCP (the CLI's built-in extensions, which SDK sessions don't load): the servers in app/mcp.json, with
     // codemode and tool_search for servers whose tools aren't direct. Sign-ins: app/mcp-auth.json (not versioned).
-    const resourceLoader = new DefaultResourceLoader({ cwd: WORK, agentDir: APP, settingsManager, noContextFiles: true,
+    const resourceLoader = new DefaultResourceLoader({ cwd: WORKSPACE, agentDir: AGENT, settingsManager, noContextFiles: true,
       extensionFactories: [createCodemodeExtension(), createToolSearchExtension(),
-        createMcpExtension({ logPath: path.join(STATE, "mcp.log") })] });
+        createMcpExtension({ logPath: path.join(DATA, "mcp.log") })] });
     await resourceLoader.reload();
     for (const e of resourceLoader.getExtensions().errors) console.error(`${name}: extension ${e.path} failed: ${e.error}`);
     const { session } = await createAgentSession({
-      cwd: WORK, agentDir: APP, resourceLoader, settingsManager,
+      cwd: WORKSPACE, agentDir: AGENT, resourceLoader, settingsManager,
       // the saved conversation, or a new one
-      sessionManager: fresh ? SessionManager.create(WORK, dir) : SessionManager.continueRecent(WORK, dir),
+      sessionManager: fresh ? SessionManager.create(WORKSPACE, dir) : SessionManager.continueRecent(WORKSPACE, dir),
     });
     if (session.sessionName !== name) session.setSessionName(name);
     const empty = session.sessionManager.buildSessionContext().messages.length === 0;
@@ -144,9 +219,9 @@ const host = {
       console.error(`${name}: extension ${e.extensionPath} (${e.event}): ${e.error}`);
       emit("error", { agent: name, text: `extension ${e.extensionPath} (${e.event}): ${e.error}` });
     } });
-    // the model: the one picked with /login or /model (extensions/login), else the MODEL_BASE_URL endpoint (extensions/model).
+    // the model: the one picked with /login or /model, else the MODEL_BASE_URL endpoint (both: extensions/model).
     // CHALKY_LOGIN=off (a cloud deployment, the backend's endpoint): always that endpoint, whatever an extension says
-    const picked = process.env.CHALKY_LOGIN === "off" ? undefined : host.api.login?.modelFor(name, session);
+    const picked = process.env.CHALKY_LOGIN === "off" ? undefined : host.api.model?.modelFor(name, session);
     const model = picked ?? session.modelRuntime.getModel("chalky", process.env.MODEL_NAME || "default");
     if (model) await session.setModel(model);
     // thinking level: the agent's own (the /thinking command), which pi keeps in its session file; an empty
@@ -186,58 +261,70 @@ function file(res: http.ServerResponse, p: string) {
   fs.createReadStream(p).pipe(res);
 }
 
-// ---- recovery: the safety net for when an agent breaks the page (or the versions extension, so its panel) ----
-// Here, not in an extension, so agents can't break it too. Plain HTML forms, no script: it works whatever app/ holds.
-//   GET  /recover        the saved versions (state/versions.git, written by the versions extension), newest first;
-//                        "the page worked" = the page took its picture of that version (state/shots/<sha>.png);
-//                        the newest too (a broken versions extension doesn't save the edit that broke it)
-//   POST /recover/<sha>  that version's files back into app/, as a new commit (as the versions panel's rollback,
+// ---- the version history: one git repo for agent/ and built/ (inHistory), kept in data/version/git ----
+// Outside the folders it keeps, so an agent's own git commands can't rewrite it. Git through isomorphic-git (pure JS).
+// The version extension commits and rolls back with this; /recover too, so it works when that extension is broken.
+//   repo     isomorphic-git's {fs, dir: HOME, gitdir}
+//   stage()  git add -A for what inHistory keeps (.gitignore files play no part); returns the changed paths
+const REPO = { fs, dir: HOME, gitdir: path.join(DATA, "version", "git") };
+const KEPT = { filepaths: ["agent", "built"], ignored: true, filter: inHistory };  // statusMatrix's walk: only these
+async function stage() {
+  const changed = [];
+  for (const [filepath, head, workdir, index] of await git.statusMatrix({ ...REPO, ...KEPT })) {
+    if (head === 1 && workdir === 1 && index === 1) continue;  // unchanged
+    if (workdir === 0) { if (index !== 0) await git.remove({ ...REPO, filepath }); }
+    else await git.add({ ...REPO, filepath, force: true });
+    changed.push(filepath);
+  }
+  return changed;
+}
+Object.assign(host, { history: { repo: REPO, kept: KEPT, stage } });
+
+// ---- recovery: the safety net for when an agent breaks the page (or the version extension, so its panel) ----
+// Here, not in an extension, so agents can't break it too. Plain HTML forms, no script: it works whatever agent/ holds.
+//   GET  /recover        the saved versions, newest first; "the page worked" = the page took its picture of that
+//                        version (data/version/shots/<sha>.png); the newest too (a broken version extension doesn't
+//                        save the edit that broke it)
+//   POST /recover/<sha>  that version's agent/ and built/ back, as a new commit (as the version panel's rollback,
 //                        without its extras), then every agent's extensions load again; back to the page
 // Also shown at / when no extension serves the page (the page extension failed to load).
-const REPO = { fs, dir: APP, gitdir: path.join(STATE, "versions.git") };
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 
 async function recoverPage(res: http.ServerResponse) {
   const log = fs.existsSync(REPO.gitdir) ? await git.log(REPO) : [];
   const rows = log.map(({ oid, commit: c }, i) => `<tr><td>${new Date(c.author.timestamp * 1000).toLocaleString()}</td>
     <td>${esc(c.author.name)}</td><td>${esc(c.message.split("\n")[0])}</td>
-    <td>${fs.existsSync(path.join(STATE, "shots", `${oid}.png`)) ? "the page worked" : ""}</td>
+    <td>${fs.existsSync(path.join(DATA, "version", "shots", `${oid}.png`)) ? "the page worked" : ""}</td>
     <td><form method="post" action="/recover/${oid}"><button>go back to this</button></form>${i ? "" : " (the last saved)"}</td></tr>`);
   const failed = host.agents.get("agent1")?.session.resourceLoader.getExtensions().errors ?? [];  // what didn't load
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(`<!doctype html><title>Recover</title>
 <style>body{font:14px system-ui;margin:2em}td{padding:4px 10px;border-bottom:1px solid #ddd}</style>
 <h1>Recover</h1><p>If an agent broke the page, go back to a version where it worked. Nothing is lost: the current
 files are saved first, and going back is itself a new version. <a href="/">Back to the page</a></p>
-${failed.map((e: any) => `<p style="color:#b00">Failed to load: ${esc(path.relative(APP, e.path))}: ${esc(String(e.error))}</p>`).join("")}
+${failed.map((e: any) => `<p style="color:#b00">Failed to load: ${esc(path.relative(AGENT, e.path))}: ${esc(String(e.error))}</p>`).join("")}
 <table>${rows.join("") || "<tr><td>No versions yet.</td></tr>"}</table>`);
 }
 
 async function recover(sha: string, res: http.ServerResponse) {
   try { sha = await git.expandOid({ ...REPO, oid: sha }); } catch { return res.writeHead(404).end(); }
-  await host.shared.get("versions")?.queue;  // after the versions extension's own work
-  try { await host.api.swarm?.stop(); } catch {}  // the swarm extension may be the broken one
+  await host.shared.get("version")?.queue;  // after the versions extension's own work
+  try { await host.api.team?.stop(); } catch {}  // the team extension may be the broken one
   for (const name of host.agents.keys()) await host.abort(name);
-  const stage = async () => {  // git add -A (new ignored files skipped: statusMatrix misses info/exclude, see versions)
-    for (const [f, h, w, i] of await git.statusMatrix(REPO)) {
-      if ((h === 1 && w === 1 && i === 1) || (h === 0 && i === 0 && await git.isIgnored({ ...REPO, filepath: f }))) continue;
-      if (w === 0) { if (i !== 0) await git.remove({ ...REPO, filepath: f }); } else await git.add({ ...REPO, filepath: f });
-    }
-  };
   const author = { name: "user", email: "user@chalky" };
   const subject = `${sha.slice(0, 7)} ${(await git.readCommit({ ...REPO, oid: sha })).commit.message.split("\n")[0]}`;
   await stage();
   try { await git.commit({ ...REPO, message: "uncommitted changes before recovery", author, disallowEmpty: true }); } catch {}
-  await git.checkout({ ...REPO, ref: sha, noUpdateHead: true, force: true });
-  const files = (await git.statusMatrix(REPO)).filter(([, h, w, i]) => !(h === 1 && w === 1 && i === 1)).map(([f]) => f);
-  for (const f of files) for (let d = path.dirname(f); d !== "."; d = path.dirname(d)) {  // folders it emptied
-    try { fs.rmdirSync(path.join(APP, d)); } catch { break; }
+  await git.checkout({ ...REPO, ref: sha, noUpdateHead: true, force: true, filepaths: KEPT.filepaths });
+  const files = await stage();
+  for (const f of files) for (let d = path.dirname(f); !["agent", "built", "."].includes(d); d = path.dirname(d)) {  // folders it emptied
+    try { fs.rmdirSync(path.join(HOME, d)); } catch { break; }
   }
   await git.commit({ ...REPO, message: `recover to ${subject}`, author });
   for (const name of host.agents.keys()) await host.reloadAgent(name);
-  if (files.includes("ui/surfaces.json")) host.shared.get("ui")?.load?.();
+  if (files.includes("built/card.json")) { host.shared.get("card")?.load?.(); host.api.history?.add("user", `recovered to ${subject}`); }
   for (const name of host.agents.keys())
-    host.api.swarm?.fyi("system", name, `The user recovered ${APP} to version ${subject} (the page was broken). `
-      + `Later changes are undone (still in the history: GET http://127.0.0.1:${PORT}/versions). Check before relying on them.`);
+    host.api.team?.fyi("system", name, `The user recovered ${AGENT} and ${BUILT} to version ${subject} (the page was broken). `
+      + `Later changes are undone (still in the history: GET http://127.0.0.1:${PORT}/version). Check before relying on them.`);
   console.log(`recovered to ${subject}`);
   res.writeHead(303, { location: "/" }).end();
 }
@@ -246,6 +333,11 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url!, "http://x").pathname;
   if (url === "/recover") return void recoverPage(res);
   if (url.startsWith("/recover/") && req.method === "POST") return void recover(url.slice(9), res);
+  if (url.startsWith("/built/")) {  // what the agents made, at the same path as on disk (built/ holds no secrets)
+    let p = "";
+    try { p = path.join(HOME, path.posix.normalize(decodeURIComponent(url))); } catch {}  // a bad %-escape: 404
+    return p.startsWith(BUILT + path.sep) ? file(res, p) : void res.writeHead(404).end();  // also a ".." out of built/
+  }
   let route = host.routes.get(url);
   for (let p = url; !route && p.lastIndexOf("/") > 0; route = host.routes.get(p + "/")) p = p.slice(0, p.lastIndexOf("/"));
   if (route) return route(req, res);
@@ -263,7 +355,7 @@ new WebSocketServer({ server, path: "/ws" }).on("connection", (sock) => {
     const data = JSON.parse(String(raw));
     const kind = data.type ?? "chat";
     if (kind === "chat") host.send("user", data.to === "main" || !host.agents.has(data.to) ? "agent1" : data.to, data.text);
-    else if (kind === "stop" && host.api.swarm) await host.api.swarm.stop();
+    else if (kind === "stop" && host.api.team) await host.api.team.stop();
     else if (kind === "stop") {
       for (const a of host.agents.values()) await host.abort(a.name);
       emit("stopped", { agent: "all" });
@@ -273,8 +365,8 @@ new WebSocketServer({ server, path: "/ws" }).on("connection", (sock) => {
 
 // agent1, then every agent saved by an earlier run (their conversations come back from their session files)
 await host.createAgent("agent1", "the user's main agent");
-for (const name of fs.readdirSync(path.join(STATE, "sessions")).filter((n) => n !== "agent1")) {
-  const { role, app } = JSON.parse(fs.readFileSync(path.join(STATE, "sessions", name, "role.json"), "utf8"));
+for (const name of fs.readdirSync(path.join(DATA, "sessions")).filter((n) => n !== "agent1")) {
+  const { role, app } = JSON.parse(fs.readFileSync(path.join(DATA, "sessions", name, "role.json"), "utf8"));
   await host.createAgent(name, role, app);
 }
 const hostName = process.env.UI_HOST || "127.0.0.1";

@@ -10,13 +10,11 @@
   "files": [
     "bin/",
     "server.ts",
-    "app/",
-    "!app/auth.json",
-    "!app/models-store.json",
-    "!app/mcp-auth.json",
-    "!app/ui/surfaces.json",
-    "!app/ui/apps/*",
-    "app/ui/apps/.keep"
+    "agent/",
+    "!agent/auth.json",
+    "!agent/models-store.json",
+    "!agent/models.json",
+    "!agent/mcp-auth.json"
   ],
   "publishConfig": {
     "access": "public"

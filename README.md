@@ -34,13 +34,18 @@ Then open http://127.0.0.1:3000.
 
 `~/.chalky` (or `CHALKY_HOME`) holds:
 
-- `app/`: the agents' code, copied from the package on the first run. The agents edit it, and each change is
-  versioned. A newer version of the package doesn't overwrite it.
-- `state/`: conversations, version history, what the apps keep.
-- `workspace/`: the agents' working folder.
+- `agent/`: what the agents are: their prompt, settings and extensions (the page among them), copied from the
+  package on the first run. The agents edit it. A newer version of the package doesn't overwrite it.
+- `built/`: what the agents made for you: the cards on your boards, and the apps they wrote.
+- `data/`: what is kept while running: conversations, what you typed into cards and apps, notes, undo history.
+- `workspace/`: the agents' working folder; `workspace/drops/` holds your files.
+
+`agent/` and `built/` share one version history: each agent turn that changes them is saved, and a rollback puts
+both back. A home from before this layout (`app/`, `state/`) is moved into it on the first start; the old code
+stays in `app-before-reorg/`.
 
 ## MCP servers
 
-Tools from MCP servers go in `~/.chalky/app/mcp.json`, in pi's format (stdio or streamable HTTP; see pi's
+Tools from MCP servers go in `~/.chalky/agent/mcp.json`, in pi's format (stdio or streamable HTTP; see pi's
 `docs/mcp.md`). Type `/mcp` on the page to choose which servers and tools the agents may use. Keep secrets in
 environment variables and refer to them as `${NAME}` in `headers` or `env`.

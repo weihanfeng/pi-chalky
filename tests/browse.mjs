@@ -1,6 +1,6 @@
 // Drive a headless Chrome through its DevTools port: open the page, run some JavaScript in it, save a screenshot.
 //   node tests/browse.mjs <out.png> '<js to run on the page: the body of an async function>' [port]
-// Chrome must be running with --remote-debugging-port (see NOTES.md, "Tests").
+// Chrome must be running with --remote-debugging-port (see NOTES.md, "Tests"). PORT: Chalky's, default 3000.
 import fs from "node:fs";
 import WebSocket from "ws";
 
@@ -17,8 +17,8 @@ const call = (method, params = {}) => new Promise((resolve) => {
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 await call("Emulation.setDeviceMetricsOverride", { width: 1400, height: 850, deviceScaleFactor: 1, mobile: false });
-await call("Page.navigate", { url: "http://127.0.0.1:3000/" });
-await wait(3000);  // the page loads its plugins and replays the record
+await call("Page.navigate", { url: `http://127.0.0.1:${process.env.PORT || 3000}/` });
+await wait(3000);  // the page loads its browser parts and replays the record
 const r = js && await call("Runtime.evaluate", { expression: `(async () => { ${js} })()`, awaitPromise: true, returnByValue: true });
 if (r) console.log(r.exceptionDetails?.exception?.description ?? r.result?.value);
 await wait(1500);

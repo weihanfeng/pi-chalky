@@ -1,9 +1,9 @@
-// Sends page messages (as the page's browser plugins do) and prints what comes back for a while.
-// node tests/page.mjs <seconds> '<json>' ['<json>' ...]   (each sent 1 s after the one before)
+// Sends page messages (as the extensions' browser.js do) and prints what comes back for a while.
+// node tests/page.mjs <seconds> '<json>' ['<json>' ...]   (each sent 1 s after the one before; PORT: the server's, default 3000)
 import WebSocket from "ws";
 
 const [secs, ...msgs] = process.argv.slice(2);
-const ws = new WebSocket("ws://127.0.0.1:3000/ws");
+const ws = new WebSocket(`ws://127.0.0.1:${process.env.PORT || 3000}/ws`);
 const start = Date.now() / 1000;
 ws.on("open", () => msgs.forEach((m, i) => setTimeout(() => ws.send(m), 500 + i * 1000)));
 ws.on("message", (raw) => {

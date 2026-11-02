@@ -1,18 +1,19 @@
-# pi's logins (made by the model login): never commit
-app/auth.json
-app/models-store.json
+# pi's logins and endpoints (the model extension writes them): never commit
+agent/auth.json
+agent/models-store.json
+agent/models.json
+agent/mcp-auth.json
 
-# Runtime: conversations, version history, pictures, logs; the agents' workspace
+# What the agents make (built/), what is kept while running (data/), their working folder (workspace/): a fresh
+# install starts with none. Also what the move to these folders kept of an older layout, and this repo's own
+# agent/ui/ (what was built here before the move: server.ts moves it to built/ on the next start).
+built/
+data/
+workspace/
+app-before-reorg/
+agent/ui/
 state/
 state-*/
-workspace/
-
-# What the agents build while running (a fresh install starts with none)
-app/ui/surfaces.json
-app/ui/boards.json
-app/models.json
-app/ui/apps/*
-!app/ui/apps/.keep
 
 # Installed by npm
 node_modules/
