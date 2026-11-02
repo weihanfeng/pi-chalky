@@ -38,7 +38,7 @@ awk '/^import /{exit} 1' extensions/swarm/index.ts     # everything above the im
 Read only the headers of the extensions your work touches. All of them at once is over 13,000 characters.
 
 ## 3. Then only the code you will change
-Use `grep -n` to find the function, then `sed -n 'START,ENDp'` for that part. A whole file can be long
+Use `grep -n` to find the function, then `read` with `offset` (its first line) and `limit` for that part. A whole file can be long
 (swarm's index.ts is over 16,000 characters). If you are planning work for other agents, the headers are usually
 enough: let each agent read the code it owns.
 

@@ -12,7 +12,7 @@
 //   GET  /viewer/view?path=   {"kind": "image"|"pdf"|"text"|"sheets"|"doc"|"slides"|"none", ...} (see preview())
 //   GET  /viewer/raw?path=    the file's bytes, images and pdf only
 //   POST /viewer/shot         a png of an area the user drew around on a pdf; saved in SHOTS, returns {"path"}
-// Tool read_document(path): the same content as text, for the agent (pdf text with unpdf). The Python tool was
+// Tool read_document(path, offset?): the same content as text, for the agent (pdf text with unpdf). The Python tool was
 // read_file; renamed so it isn't mistaken for pi's read (text and pictures, which the guide now names for pictures).
 import fs from "node:fs";
 import path from "node:path";
@@ -191,13 +191,17 @@ export default function (pi: ExtensionAPI) {
     name: "read_document", label: "Read document",
     description: "Read a document as text: docx, pptx, xlsx, xls, csv, pdf, doc, or any text file "
       + "(sheets come back as CSV, slides and pages numbered).",
-    parameters: Type.Object({ path: Type.String() }),
-    async execute(_id, { path: p }) {
+    parameters: Type.Object({ path: Type.String(),
+      offset: Type.Optional(Type.Number({ description: "the character to start from, to read on in a long document" })) }),
+    async execute(_id, { path: p, offset = 0 }) {
       let text: string;
       if (!fs.existsSync(p) || !fs.statSync(p).isFile()) text = `error: no file ${p}`;
       else {
-        try { text = await asText(p); } catch (e: any) { text = `error: could not read ${p}: ${e.name}: ${e.message}`; }
-        if (text.length > MAX_TOOL_TEXT) text = text.slice(0, MAX_TOOL_TEXT) + `\n[... cut: ${text.length} characters in all; read parts of it with bash]`;
+        try {
+          const whole = await asText(p), end = offset + MAX_TOOL_TEXT;
+          text = whole.slice(offset, end);
+          if (end < whole.length) text += `\n[... cut: ${whole.length} characters in all; call again with offset=${end} for the rest]`;
+        } catch (e: any) { text = `error: could not read ${p}: ${e.name}: ${e.message}`; }
       }
       return { content: [{ type: "text", text }], details: undefined };
     },
