@@ -178,7 +178,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({
       surface: Type.String(),
       components: Type.Optional(Type.Array(Type.Record(Type.String(), Type.Any()))),
-      data: Type.Optional(Type.Record(Type.String(), Type.Any())),
+      data: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "leave out to keep the surface's data" })),
       place: Place,
       draggable: Type.Optional(Type.Boolean()), resizable: Type.Optional(Type.Boolean()),
       about: Type.Optional(Type.String({ description: "what it is for and why it is built this way (its back side)" })),
@@ -200,7 +200,7 @@ export default function (pi: ExtensionAPI) {
       const old = ui.surfaces[a.surface] ?? {}, catalog = readCatalog(), boards = host.api.boards;
       if (typeof a.board === "number" && boards && !boards.has(a.board))
         return result(`error: no board ${a.board}. Boards: ${boards.list().join(", ")} (or board "new")`);
-      const first = options[0] ?? { components: a.components, data: a.data ?? {} };
+      const first = options[0] ?? { components: a.components, data: a.data ?? old.data ?? {} };
       const record: any = { owner: agent, components: first.components, data: first.data, place: a.place ?? old.place ?? null,
         draggable: a.draggable ?? true, resizable: a.resizable ?? true, about: a.about ?? old.about ?? "",
         kinds: Object.fromEntries((options.length ? options : [first]).flatMap((o: any) => o.components)
@@ -217,15 +217,27 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "ui_update", label: "UI update", description: "Change one value in a surface's data (e.g. a score or a list).",
-    parameters: Type.Object({ surface: Type.String(), path: Type.String({ description: "e.g. /score" }), value: Type.Any() }),
+    name: "ui_update", label: "UI update", description: "Change one value in a surface's data (e.g. a score or a list), "
+      + "or with component, one prop of that component (e.g. a label): the rest of the surface stays as it is.",
+    parameters: Type.Object({ surface: Type.String(),
+      path: Type.String({ description: "a data path, e.g. /score; with component: the prop, e.g. text" }), value: Type.Any(),
+      component: Type.Optional(Type.String({ description: "a component's id: change its prop instead of data" })) }),
     async execute(_id, a) {
       if (!(a.surface in ui.surfaces)) return result(`error: no surface '${a.surface}'. Surfaces: ${Object.keys(ui.surfaces).join(", ")}`);
       const locked = ui.locked(a.surface);
       if (locked) return result(locked);
-      const r = ui.get(a.surface);
+      const r = ui.get(a.surface), agent = pi.getSessionName() ?? "agent";
+      if (a.component !== undefined) {  // as the page's ui_prop: structure (id, component, children) only via ui_render
+        const c = r.components.find((c: any) => c.id === a.component);
+        if (!c) return result(`error: no component '${a.component}' in ${a.surface}. Components: ${r.components.map((c: any) => c.id).join(", ")}`);
+        if (["id", "component", "children", "child"].includes(a.path)) return result(`error: '${a.path}' changes the structure: use ui_render`);
+        c[a.path] = a.value;
+        const errors = problems(r.components, r.made_from);
+        if (errors.length) return result("error: " + errors.join("; "));
+        ui.change(a.surface, r, agent, `${agent} set ${a.path} of ${a.component} in ${a.surface}`);
+        return result("updated");
+      }
       setPath(r.data, a.path, a.value);
-      const agent = pi.getSessionName() ?? "agent";
       ui.change(a.surface, r, agent, `${agent} changed ${a.path} in ${a.surface}`);
       return result("updated");
     },

@@ -37,7 +37,9 @@ Before building or restyling what the user sees, load the ui-design skill (how i
   and the surface's root component fills the new size. So build things that fill their space (sizes in %,
   flex, or scaled to their box, e.g. an SVG with a viewBox), not fixed px. Pass resizable=false only when the
   user wants a fixed size.
-- ui_update(surface, path, value): change data only (fast; components keep their state). ui_delete(surface).
+- ui_update(surface, path, value): change data only (fast; components keep their state). With component=<its id>,
+  path is a prop of that component (e.g. a label's text): a small fix without ui_render. ui_render without data
+  keeps the surface's data. ui_delete(surface).
 - Data (what users typed, rows, scores) is kept in {data}/ui-data.json (not versioned); the rest of each
   surface in {code}/ui/surfaces.json. The user can undo any change (theirs or yours), so don't keep backups.
 - A Button's click writes its set ({path: value}) into the surface's data on the page; you are not woken,
