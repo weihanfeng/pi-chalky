@@ -1,6 +1,6 @@
 ---
 name: design
-description: How to make what you build for the user look good and read clearly - cards, blocks, apps, charts and diagrams. Use before building or restyling anything the user will see in the main space.
+description: How to make what you build for the user look good and read clearly - charts, diagrams, game art, dashboards, one look across cards. Use for those, for a restyle, or for a look the user asks for; the app README has the basics a usual app needs.
 ---
 # Designing what the user sees
 

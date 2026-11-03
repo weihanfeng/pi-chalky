@@ -29,7 +29,7 @@ at run time you make no calls at all.
    briefly, starting with [to: <name>] or [to: all]. Don't use tools." App agents have the same tools
    you have; this keeps them in character, fast, and gives the app a "to" to draw.
 2. **Build it as an app**: `{built}/apps/<name>/index.html` and its scripts, shown on a card with
-   `card_show(card="<card>", app="<full path of that index.html>")`.
+   `card_show(card="<card>", app="<name>")`.
    An app can import `/app/agents.js`; the bridge finds the app's card from the frame it runs in.
 3. **Spawn the members once**, while building: `team_spawn(role, name=..., app="<card>")`, the same
    string as the card id. In the app, check `agents.list()`: if a member is missing, show that
@@ -37,7 +37,8 @@ at run time you make no calls at all.
 4. **Wire the app with `/app/agents.js`** (read its header: {agent}/extensions/app/agents.js):
    - `send(to, text)`: ask a member. Its answer arrives as a `"message"` event: `agent` is that member,
      `role` is `"assistant"`, and there are no `tool_calls` (its final answer).
-   - `on("message", fn)`: draw each answer as it arrives (speaker, the `[to: …]` target, the text).
+   - `on("message", fn)`: draw each answer as it arrives: `ev.agent` (the speaker), `ev.to` (its target,
+     "all" when it gave none) and `ev.text` (the answer without its `[to: …]` tag; show this, not `ev.content`).
    - `reset()`: a fresh round, members' memories empty and roles kept. Call it before each run if the
      user wants rounds to start fresh.
    - `action(name, context)`: only for what needs you, e.g. "add a member" (you spawn it).
@@ -85,6 +86,5 @@ answer from an earlier run must not resolve a new question.
 
 ## Pitfalls
 - Disable Start while a run is going: a double click starts two runs.
-- An answer without a `[to: …]` tag: treat it as to all.
 - If the app shows nothing, the panel won't help (app agents are hidden there): check the app with
   browser-check, e.g. `eval:` the length of its transcript, and look for `"error"` events.

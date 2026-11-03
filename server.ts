@@ -199,8 +199,8 @@ const host = {
     // SYSTEM.md, extensions, skills, settings), so an agent's project files can't change it; app/ (versioned) is the only place
     const settingsManager = SettingsManager.create(WORKSPACE, AGENT, { projectTrusted: false });
     // agentDir = app/: pi finds app/extensions/<name>/index.ts and app/skills/* itself, again on every reload
-    // pi's MCP (the CLI's built-in extensions, which SDK sessions don't load): the servers in app/mcp.json, with
-    // codemode and tool_search for servers whose tools aren't direct. Sign-ins: app/mcp-auth.json (not versioned).
+    // pi's MCP (the CLI's built-in extensions, which SDK sessions don't load): the servers in agent/mcp.json, with
+    // codemode and tool_search for servers whose tools aren't direct. Sign-ins: agent/mcp-auth.json (not versioned).
     const resourceLoader = new DefaultResourceLoader({ cwd: WORKSPACE, agentDir: AGENT, settingsManager, noContextFiles: true,
       extensionFactories: [createCodemodeExtension(), createToolSearchExtension(),
         createMcpExtension({ logPath: path.join(DATA, "mcp.log") })] });
@@ -291,7 +291,8 @@ Object.assign(host, { history: { repo: REPO, kept: KEPT, stage } });
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 
 async function recoverPage(res: http.ServerResponse) {
-  const log = fs.existsSync(REPO.gitdir) ? await git.log(REPO) : [];
+  // the history's folder comes before its first commit: right after a start there may be no versions yet
+  const log = fs.existsSync(REPO.gitdir) ? await git.log(REPO).catch((e) => e.code === "NotFoundError" ? [] : Promise.reject(e)) : [];
   const rows = log.map(({ oid, commit: c }, i) => `<tr><td>${new Date(c.author.timestamp * 1000).toLocaleString()}</td>
     <td>${esc(c.author.name)}</td><td>${esc(c.message.split("\n")[0])}</td>
     <td>${fs.existsSync(path.join(DATA, "version", "shots", `${oid}.png`)) ? "the page worked" : ""}</td>

@@ -1,3 +1,8 @@
 {
-  "compaction": { "keepRecentTokens": 20000 }
+  "compaction": {
+    "keepRecentTokens": 20000
+  },
+  "defaultTools": [
+    "+tool_search"
+  ]
 }

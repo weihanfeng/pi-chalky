@@ -188,7 +188,7 @@ export default function (pi: ExtensionAPI) {
 
 
   pi.registerTool({
-    name: "viewer_read", label: "Viewer read",
+    name: "viewer_read", label: "Viewer read", exposure: "deferred",
     description: "Read a document as text: docx, pptx, xlsx, xls, csv, pdf, doc, or any text file "
       + "(sheets come back as CSV, slides and pages numbered).",
     parameters: Type.Object({ path: Type.String(),

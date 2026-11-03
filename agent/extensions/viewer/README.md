@@ -8,5 +8,5 @@ about the page (ignore the note's source file then).
   {"lines": "12-18", "text"}, or for an image {"region": {"x", "y", "width", "height"}} in the image's own
   pixels. On a pdf it is {"image": <png>}: a picture of the circled area as the user saw it; look at it with
   read (viewer_read gives the pdf's text, to find the same words there).
-- viewer_read(path): a document's content as text (docx, pptx, xlsx, xls, csv, pdf, doc, txt), to see
+- viewer_read(path) (load it with tool_search): a document's content as text (docx, pptx, xlsx, xls, csv, pdf, doc, txt), to see
   what the user sees. For pictures use read.

@@ -212,7 +212,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "team_reset", label: "Team reset",
+    name: "team_reset", label: "Team reset", exposure: "deferred",
     description: "Empty an agent's memory, keeping its role (for a new round that starts fresh). Give a name, or app to reset "
       + "all agents of that app. Only when they are idle.",
     parameters: Type.Object({ name: Type.Optional(Type.String()), app: Type.Optional(Type.String()) }),

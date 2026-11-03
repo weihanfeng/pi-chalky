@@ -50,7 +50,7 @@ const result = (text: string, png?: string) => ({ details: undefined, content: [
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
-    name: "screen_see", label: "Screen see",
+    name: "screen_see", label: "Screen see", exposure: "deferred",
     description: "See the user's screen as they see it right now: a picture of their whole window (their size, scroll, "
       + "open panels, apps as they are running). browser-check's headless Chrome is a fresh window of its own, not theirs: when "
       + "the user talks about what they see, or before you say something looks right to them, look here. The first "

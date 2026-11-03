@@ -1,7 +1,8 @@
 // Cards: what the agents show the user, each one thing on a board in the page's main space (browser.js draws them).
 // A card shows blocks (a JSON list of pieces from blocks/*.js: Text, Button, Table...) or an app (a page of its own in
 // built/apps/<name>/, in a frame; the app extension serves its data and its bridge to the agents).
-// Tools card_blocks, card_show, card_update, card_remove. The cards are shared by every agent: one Cards object on
+// Tools card_blocks, card_show, card_update, card_remove. card_show of an app opens the page in the browser-check
+// skill's headless browser and says what it found: errors, and whether the app fits its card. The cards are shared by every agent: one Cards object on
 // the host, made by whichever agent loads first.
 // One door: every change goes through change(): it saves, tells every open page, and calls every watcher with the
 // card, who did it and the words for it ("you moved s1"; none: part of a bigger change). restore() puts back a
@@ -19,6 +20,7 @@
 //   page event "card"       {op: "render", card, ...record} | {op: "delete", card} | {op: "reset", cards}
 import fs from "node:fs";
 import path from "node:path";
+import { execFile } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
@@ -122,12 +124,25 @@ function problems(blocks: any[], madeFrom: string[] = []) {
       if (isRef(v) && !(v.ref in cards.cards)) errors.push(`${b.id}.${k}: refers to card '${v.ref}', which does not exist`);
     }
   }
+  const byId = new Map(blocks.map((b) => [b.id, b])), drawn = new Set<string>();
+  const walk = (id: string) => {  // what is drawn: root and what it contains, down
+    if (drawn.has(id) || !byId.has(id)) return;
+    drawn.add(id);
+    const b = byId.get(id);
+    for (const c of [...(b.children ?? []), ...(b.child ? [b.child] : [])]) walk(c);
+  };
+  walk("root");
+  const orphans = ids.has("root") ? [...ids].filter((id) => !drawn.has(id)) : [];
+  if (orphans.length) errors.push(`${orphans.join(", ")}: not inside root (no block lists ${orphans.length > 1 ? "them" : "it"} in children or child), so never drawn`);
   return [...errors, ...madeFrom.filter((m) => !(m in cards.cards)).map((m) => `made_from: no card '${m}'`)];
 }
 
-// An app's page, given as its full path: its path in built/, or an error that says where it should be
-function appPath(full: string): { app?: string; error?: string } {
+// An app's page, given as its name ("habit": apps/habit/index.html), its path in built/ or its full path: its path in
+// built/, or an error that says where it should be
+function appPath(given: string): { app?: string; error?: string } {
   const apps = path.join(host.built, "apps");
+  const full = !given.includes("/") ? path.join(apps, given, "index.html")
+    : path.isAbsolute(given) ? given : path.join(host.built, given.replace(/^\/?(built\/)?/, ""));
   const p = path.resolve(full);
   if (!p.startsWith(apps + path.sep)) return { error: `an app's page is a file in ${apps}/<name>/ (e.g. ${apps}/habit/index.html); ${full} is not` };
   if (!fs.existsSync(p) || !fs.statSync(p).isFile()) return { error: `no file ${p}: write the app's page there first` };
@@ -155,6 +170,25 @@ function readCatalog() {
   return out;
 }
 
+// An app card as the user sees it: the page opened in the headless browser of the browser-check skill, its errors and
+// whether the app fits its card. A few seconds; what it can't do (no browser yet) it says, and the card stays.
+function checkOnBoard(id: string): Promise<string> {
+  const script = path.join(host.agent, "skills/browser-check/scripts/check.mjs");
+  const measure = `eval:(()=>{const f=document.querySelector('[data-card="${id}"] iframe'); if(!f) return 'none';
+    const d=f.contentDocument; return f.clientHeight+' '+d.documentElement.scrollHeight+' '+f.clientWidth+' '+d.documentElement.scrollWidth})()`;
+  return new Promise((resolve) => execFile(process.execPath, [script, `http://127.0.0.1:${host.port}/`, "wait:2500", measure],
+    { timeout: 45000 }, (err, stdout) => {
+      const errors = /errors \((\d+)\):\n?([\s\S]*?)\n?layout problems/.exec(stdout ?? "");
+      const m = /-> "(\d+) (\d+) (\d+) (\d+)"/.exec(stdout ?? "");
+      if (!errors) return resolve(`not checked (${String(err?.message ?? stdout).split("\n")[0].slice(0, 200)})`);
+      const said = Number(errors[1]) ? `${errors[1]} error(s): ${errors[2].trim().slice(0, 600)}` : "no errors";
+      const fit = !m ? "not on the board the user is on, so not measured"
+        : Number(m[2]) > Number(m[1]) + 2 ? `its content is ${m[2]}px tall in a ${m[1]}px card, so it scrolls inside: make it fit (or pass height=${Number(m[2]) + 8})`
+        : Number(m[4]) > Number(m[3]) + 2 ? `its content is ${m[4]}px wide in a ${m[3]}px card: make it fit` : "it fits its card";
+      resolve(`checked on the board: ${said}; ${fit}`);
+    }));
+}
+
 const result = (text: string) => ({ content: [{ type: "text" as const, text }], details: undefined });
 const Place = Type.Optional(Type.Object({ x: Type.Number(), y: Type.Number(), width: Type.Optional(Type.Number()), height: Type.Optional(Type.Number()) },
   { description: "pin it at a spot (px from the main space's top-left); leave out to stack it" }));
@@ -172,12 +206,13 @@ export default function (pi: ExtensionAPI) {
   }));
 
   pi.registerTool({
-    name: "card_blocks", label: "Card blocks", description: "List the blocks you can build a card from, with their props.",
+    name: "card_blocks", label: "Card blocks", exposure: "deferred", description: "List the blocks you can build a card from, with their props.",
     parameters: Type.Object({}),
     async execute() {
       const catalog = readCatalog();
       const broken = Object.entries(catalog).filter(([, m]: any) => m.problem).map(([n, m]: any) => `${n}: ${m.problem}`);
-      return result(Object.values(catalog).map((m: any) => m.doc + (m.about ? `\nabout: ${JSON.stringify(m.about)}` : "")).join("\n\n")
+      return result(`Before your first blocks card or a new block, read ${path.join(import.meta.dirname, "README.md")} (bindings, `
+        + `when, tabs, refs, options, new blocks).\n\n` + Object.values(catalog).map((m: any) => m.doc + (m.about ? `\nabout: ${JSON.stringify(m.about)}` : "")).join("\n\n")
         + (broken.length ? `\n\nProblems:\n${broken.join("\n")}` : ""));
     },
   });
@@ -188,7 +223,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({
       card: Type.String({ description: "its id: a clear name (the user points at things by name)" }),
       blocks: Type.Optional(Type.Array(Type.Record(Type.String(), Type.Any()), { description: 'e.g. [{"id": "root", "block": "Text", "text": "hi"}]' })),
-      app: Type.Optional(Type.String({ description: "instead of blocks: the full path of the app's page, e.g. <built>/apps/habit/index.html" })),
+      app: Type.Optional(Type.String({ description: "instead of blocks: the app's name (its page is <built>/apps/<name>/index.html)" })),
       height: Type.Optional(Type.Number({ description: "an app's height in px when nothing else sizes it (default 400)" })),
       data: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "the blocks' data; leave out to keep the card's data" })),
       place: Place,
@@ -235,8 +270,10 @@ export default function (pi: ExtensionAPI) {
       if (boards) record.board = a.board === "new" ? boards.add() : a.board ?? old.board ?? boards.current();
       cards.change(a.card, record, agent, `${agent} showed ${a.card}` + (options.length ? ` (${options.length} options)` : ""));
       const where = boards ? `on board ${record.board}${a.board === "new" ? " (a new board)" : ""}` : "on screen";
-      return result(options.length ? `card '${a.card}' shows ${options.length} options ${where}; the user flips through them and keeps one`
-        : `card '${a.card}' is ${where}` + (main.app ? `, showing ${host.built}/${main.app} (at http://127.0.0.1:${host.port}/built/${main.app})` : ""));
+      if (options.length) return result(`card '${a.card}' shows ${options.length} options ${where}; the user flips through them and keeps one`);
+      if (!main.app) return result(`card '${a.card}' is ${where}`);
+      return result(`card '${a.card}' is ${where}, showing ${host.built}/${main.app} (at http://127.0.0.1:${host.port}/built/${main.app}); `
+        + await checkOnBoard(a.card));
     },
   });
 

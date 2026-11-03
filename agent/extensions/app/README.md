@@ -1,15 +1,50 @@
-# Apps (the app extension)
-An app is a page you write in {built}/apps/<name>/ (index.html and its files), shown on a card:
-card_show(card=<id>, app=<the full path of its index.html>). It is served at {page}/built/apps/<name>/.
-- Data: an app keeps what the user makes in it (notes, lists, picks) with `import agents from "/app/agents.js"`:
-  `await agents.load()` gives the app's saved data ({} at first), `agents.save(data)` replaces it, and
-  `agents.on("app_data", ({app, data}) => ...)` hears every save of any app (check app === agents.app, its folder
-  name). Saved on the server in {data}/app/<name>.json: it survives reloads, is the same in every browser, and
-  you can read it (cat the file) when the user points at something in the app. The same app on several cards
-  shares this data, so one card's clicks update the others at once, with no agent in between. To change it
-  yourself, PUT the whole value: curl -X PUT --data @new.json {page}/app/data/<name> (the open pages update).
-  Not localStorage: that stays in one browser, and you can't see it.
-- Agents: agents.send(to, text) messages an agent (a model call: limited per minute), agents.action(name,
-  context) wakes the agent that owns the app's card, agents.on("message", fn) shows what the agents say. Read the
-  header of {agent}/extensions/app/agents.js. Agents that belong to the app (a simulation's members, characters):
-  load the app-agents skill first.
+# Making an app (the app extension)
+Everything a usual app needs is here: for one, you don't need the card README or the design and browser-check skills.
+
+## Write it, show it
+- Write {built}/apps/<name>/index.html (other files next to it), then card_show(card=<id>, app=<name>, about="...").
+  It is served at {page}/built/apps/<name>/. card_show checks it on the board and reports errors and whether it
+  fits its card: fix those and show it again. height=<px>: its height when nothing else sizes it (default 400).
+- about: one or two sentences on what it is for and any decision a later change should respect (its back side).
+- Name what the user may point at: ids or data-name on elements ("habit-Read", not "row3"). A canvas: give the
+  page's window a partAt(x, y) returning {"name", ...} for what is at that spot.
+- The user moves and resizes the card: fill the space (%, flex, grid, an SVG with a viewBox), not fixed px.
+- A pinned card (the user held its label): card_show on it fails. Make a new card (made_from=[it]) or ask.
+- Changing it later: edit the part (the edit tool), not a rewrite. App files show when your turn ends.
+
+## Keep its data
+`import agents from "/app/agents.js"` (a module script). `await agents.load()` gives the saved data ({} at first);
+`agents.save(data)` replaces it after every change (on the server, {data}/app/<name>.json: kept across reloads, the
+same in every browser, readable by you with cat). Other cards showing the same app hear each save:
+`agents.on("app_data", ({app, data}) => { if (app === agents.app) ... })` (the field is `data`). Never localStorage
+(one browser only, invisible to you). To change it yourself: curl -X PUT --data @new.json {page}/app/data/<name>.
+
+## Look
+The page is light, glassy and quiet; match it unless the user asks for another look:
+- Transparent background; the system font (`font: inherit` or system-ui); text #1d1d1f, muted rgba(60,60,67,.55),
+  accent #0071e3, danger #e5484d, lines rgba(0,0,0,.06), glass rgba(255,255,255,.7), radius 16px.
+- Show just the thing: no frame or panel around it unless it needs one. Group with flex/grid and gap.
+- Open in a working state (its real data, or a marked example), never an empty shell; `tabular-nums` for digits.
+- Buttons say what happens ("Add habit"); short plain words; status colours always with a word or icon.
+- Avoid the generic AI look: cream and terracotta, purple gradients, emoji as markers, the same shadowed card on
+  everything. For a chart, a diagram, a game's art or a restyle, load the design skill.
+
+## Check it works
+card_show covers errors and fit. Before telling the user what it does, try its main action and a reload with
+{agent}/skills/browser-check/scripts/check.mjs:
+```
+node <that check.mjs> {page}/built/apps/<name>/index.html "eval:(()=>{const i=document.querySelector('#new'); i.value='Test-1';
+  i.dispatchEvent(new Event('input',{bubbles:true})); i.form.requestSubmit(); return 'ok'})()" wait:800 \
+  "eval:document.body.innerText.includes('Test-1')"
+```
+Set values with eval (`type:` adds to what a field already holds). Run it again to see what a reload keeps.
+Your test writes the user's real data: note it first (cat {data}/app/<name>.json) and put it back afterwards
+(PUT, above). Say only what you saw working.
+
+## More
+- Calculations (totals, streaks, dates) belong in the page's code, never worked out by you and typed in.
+- Voice input: import /voice/voice.js (read its header), not the browser's speech API.
+- Libraries: put an ES-module build in {agent}/extensions/card/lib/<pkg>/ and import /card/lib/<pkg>/<file>.js.
+- Agents: agents.send(to, text) messages an agent (a model call, limited per minute); agents.action(name, context)
+  wakes the agent that owns the card; agents.on("message", fn) shows what they say (the header of
+  {agent}/extensions/app/agents.js). Agents that belong to the app (a simulation's members): load the app-agents skill.

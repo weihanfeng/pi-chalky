@@ -197,12 +197,13 @@ export default async function (page) {
     for (const [other, o] of Object.entries(cards)) if (o.blocks && refsIn(o).has(id)) draw(other, chain);
   }
 
-  function drawApp(s, id, shown) {  // an app: its page in a frame, as wide as the card; it fills a placed card, else
-    if (!s.frame) {                  // it is height px tall. The same frame across redraws: a running app isn't restarted
+  function drawApp(s, id, shown) {  // an app: its page in a frame, 640px wide (at most the space there); it fills a
+    if (!s.frame) {                  // placed card, else it is height px tall. The same frame across redraws: a running app isn't restarted
       s.frame = el("iframe");
       s.frame.style.cssText = "display:block;width:100%;min-height:0;border:0;background:transparent;color-scheme:normal";
     }
     s.frame.style.flex = `1 1 ${s.height ?? 400}px`;
+    s.frame.style.width = s.place?.width ? "100%" : "640px";  // a frame has no width of its own (else 300px)
     if (s.body.firstChild !== s.frame) s.body.replaceChildren(s.frame);
     const url = `/built/${shown.app}`;
     if (s.frame.getAttribute("src") !== url) s.frame.setAttribute("src", url);

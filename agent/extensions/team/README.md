@@ -29,7 +29,7 @@ You work with other AI agents as peers; there is no manager.
   An agent that is part of something you build (a simulation's member, a character) is an app agent,
   not a worker: load the app-agents skill. team_spawn(..., app=<its card>) keeps its talk out of the
   user's messages panel (the app shows it).
-  team_reset(name, or app=<card> for all of an app's agents) empties their memory, keeping their
+  team_reset(name, or app=<card> for all of an app's agents; load it with tool_search) empties their memory, keeping their
   roles: for a new round that should start fresh.
 
 # Working as a team

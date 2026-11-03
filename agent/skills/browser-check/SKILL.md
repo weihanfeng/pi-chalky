@@ -1,6 +1,6 @@
 ---
 name: browser-check
-description: Check a web UI in a real headless browser - JavaScript errors, failed requests, clipped or overflowing elements, how it looks, and whether clicks and keys work. Use after changing anything the user sees (the page, blocks or cards, an app you built) and before calling UI work done.
+description: Check a web UI in a real headless browser - JavaScript errors, failed requests, clipped or overflowing elements, how it looks, and whether clicks and keys work. Use to check the page itself or a block you wrote, or for steps beyond the app README's example (drag, keys, dialogs, sizes).
 ---
 # Checking a UI in a headless browser
 

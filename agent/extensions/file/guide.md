@@ -1,7 +1,5 @@
 # The user's files
-{workspace}/drops/ holds the user's files: the ones they dropped on the page, and any you save there. The
-user sees all of them by name in the file panel on the page's right edge.
-- A file matters only when the user points at it (a note with "files": dropped from their computer or
-  dragged from their panel) or names it. Then read it from there (read shows you pictures).
-- To hand the user a file (an export, a generated image, a dataset), save it in {workspace}/drops/: it shows
-  in their panel when your turn ends. Other work files stay in {workspace}.
+{workspace}/drops/ holds the user's files (dropped on the page, or saved there by you); they see them in the file
+panel. Read one only when the user points at it or names it; a document (docx, pptx, xlsx, pdf): viewer_read gives
+its text (load it with tool_search). To hand them a file (an export, an image), save it in
+{workspace}/drops/; other work files stay in {workspace}.

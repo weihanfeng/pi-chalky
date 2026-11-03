@@ -4,7 +4,8 @@
 //                                 (role "assistant", no tool_calls). Each one is a model call: limited per minute.
 //   agents.action(name, context)  an action for the agent that owns this app's card, like a Button
 //   agents.on(type, fn)           events as the page gets them, past ones first (replayed on connect), then live:
-//                                 "message" {agent, role, content, tool_calls, ts}: every message of every agent,
+//                                 "message" {agent, role, content, tool_calls, ts, to, text}: every message of every agent;
+//                                 to and text: its "[to: <name>]" tag ("all" without one) and the words after it;
 //                                 incl. its team_ask / team_tell calls (who talks to whom); "status" {agents}: who is busy
 //   agents.list()                 {name: {role, app, state, doing, queued}}, from the latest "status" event
 //   agents.reset()                empty the memories of this app's agents (spawned with app=<this card>),
@@ -22,6 +23,11 @@ let status = {};
 ws.onmessage = (e) => {
   const ev = JSON.parse(e.data);
   if (ev.type === "status") status = ev.agents;
+  if (ev.type === "message" && typeof ev.content === "string") {  // an app agent's "[to: <name>] ..." answer, read once here
+    const tag = /^\s*\[to:\s*([^\]]+)\]\s*/i.exec(ev.content);
+    ev.to = tag ? tag[1].trim() : "all";
+    ev.text = tag ? ev.content.slice(tag[0].length) : ev.content;
+  }
   for (const fn of listeners[ev.type] || []) fn(ev);
 };
 
