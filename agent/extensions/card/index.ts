@@ -273,7 +273,8 @@ export default function (pi: ExtensionAPI) {
       if (options.length) return result(`card '${a.card}' shows ${options.length} options ${where}; the user flips through them and keeps one`);
       if (!main.app) return result(`card '${a.card}' is ${where}`);
       return result(`card '${a.card}' is ${where}, showing ${host.built}/${main.app} (at http://127.0.0.1:${host.port}/built/${main.app}); `
-        + await checkOnBoard(a.card));
+        + await checkOnBoard(a.card) + ". Errors and fit are all this checked: now try its main action and a reload (the "
+        + "app README's check) before you tell the user what it does.");
     },
   });
 

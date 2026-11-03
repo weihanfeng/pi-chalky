@@ -1,6 +1,6 @@
 ---
 name: app-agents
-description: Build an app whose members are real AI agents (a simulated board meeting, a debate, a negotiation, a panel of experts, game characters), run and shown by the app itself, in turns or all at once. Use when the user wants agents inside what you build, as opposed to agents helping you build it.
+description: Build an app whose members are real AI agents (a simulated board meeting, a debate, a negotiation, a panel of experts, game characters), run and shown by the app itself, in turns or all at once. Use when the user wants agents inside what you build, as opposed to agents helping you build it. (One agent that just answers the app's questions: the app README's recipe is enough.)
 ---
 # Apps with real agents inside
 
