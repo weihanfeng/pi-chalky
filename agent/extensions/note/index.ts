@@ -146,7 +146,9 @@ export default function (pi: ExtensionAPI) {
       delete D.notes[msg.id];
       items.delete(msg.id);
       save();
-      return host.broadcast("note_gone", { id: msg.id });
+      host.broadcast("note_gone", { id: msg.id });
+      if (host.agents.has(n.to)) team?.fyi("page", n.to, `[note on the page] the user deleted note ${msg.id} ("${n.thread[0]?.text}"): it is gone from the page.`);
+      return;
     }
     if (msg.type === "note_reply" && n && team && String(msg.text ?? "").trim()) {
       n.thread.push({ by: "user", text: msg.text.trim(), ts: Date.now() });

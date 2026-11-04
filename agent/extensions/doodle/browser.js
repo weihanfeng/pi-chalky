@@ -11,6 +11,8 @@
 //           as it was when the button went down (before the click acts), cropped to the drawing, and the
 //           ink clears. The drawing goes only as the picture; typed words also go as text, exactly. Clicks
 //           are written down as words, between the steps.
+//   box     a moment after the user stops drawing, a box by the last mark asks for words: Enter there sends (sendAll).
+//           Drawing again tucks it away; Esc closes it. Ctrl+Enter anywhere also sends.
 //   Enter   in the message line (also with the marker off) sends the steps, the drawing still on the page and
 //           the words typed there, together: doodle_send, to the agent picked in the chat. The drawing still on the
 //           page stays there, saved, as a group (each mark with what the page can tell about it from geometry: say()).
@@ -87,6 +89,13 @@ export default async function (page) {
     .doodle-group.ghost path { stroke-dasharray: 6 5; }
     .doodle-group.ghost .chip { display: none; }
     body.marks-hidden :is(.doodle-group, svg.doodle-ink, .doodle-note, .note-pin) { display: none !important; }
+    #top > .doodle-ask { position: absolute; z-index: 100003; width: 300px; box-sizing: border-box; display: flex; gap: 6px; align-items: center; padding: 6px 6px 6px 12px;
+      border-radius: 12px; background: var(--glass-strong, #fff); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+      border: 1px solid ${INK}; box-shadow: 0 8px 30px rgba(0, 0, 0, .12); animation: doodle-ask .25s ease-out; cursor: auto; }
+    #top > .doodle-ask input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: inherit; font-size: 14px; color: var(--text, #1d1d1f); }
+    #top > .doodle-ask button { width: 28px; height: 28px; border-radius: 50%; border: 0; background: ${INK}; color: #fff; font-size: 15px; cursor: pointer; }
+    @keyframes doodle-ask { from { opacity: 0; transform: translateY(4px); } }
+    @media (prefers-reduced-motion: reduce) { #top > .doodle-ask { animation: none; } }
     #log [data-raw].doodle-back, #log .note.doodle-back { cursor: pointer; text-decoration: underline dotted; }`;
   document.head.append(style);
 
@@ -176,7 +185,7 @@ export default async function (page) {
   const ink = document.createElementNS(SVG, "svg");  // in the main space only while it has marks (#top:empty shows the welcome)
   ink.classList.add("doodle-ink");
   let marks = [];  // [{el, points (main px), text (words only)}], oldest first
-  const show = () => { if (marks.some((m) => m.el.localName === "path" || m.el.localName === "g")) area.append(ink); else ink.remove(); render(); };
+  const show = () => { if (marks.some((m) => m.el.localName === "path" || m.el.localName === "g")) area.append(ink); else ink.remove(); render(); if (!marks.length) hideAsk(); };
   const f = (n) => n.toFixed(1);
   const smooth = (pts) => {  // through the midpoints, so a quick line isn't a row of corners
     let d = `M${f(pts[0].x)} ${f(pts[0].y)}`;
@@ -199,6 +208,7 @@ export default async function (page) {
       if (!t) { n.remove(); return; }
       marks.push({ el: n, points: [p, { x: p.x + n.offsetWidth, y: p.y + n.offsetHeight - 14 }], text: t });
       show();
+      later();
     };
     n.onkeydown = (e) => {
       e.stopPropagation();
@@ -295,7 +305,8 @@ export default async function (page) {
     };
     const root = frameEl ? doc : area;
     root.addEventListener("pointerdown", (e) => {
-      if (!on || e.button !== 0) return;
+      if (!on || e.button !== 0 || e.target.closest?.(".doodle-ask")) return;
+      hideAsk();
       const o = offset();
       if (erasing) {  // the press is for the eraser, not for what's under it
         e.preventDefault();
@@ -342,13 +353,14 @@ export default async function (page) {
         swallow = true;  // the click that ends a line isn't a click
         setTimeout(() => { swallow = false; });
         show();
+        later();
       }
       press = line = null;
     });
     root.addEventListener("click", (e) => {
       if (swallow) { e.stopPropagation(); e.preventDefault(); swallow = false; return; }
       const t = on && e.target.closest?.(CLICKABLE);
-      if (!t || t.closest(".doodle-note")) return;
+      if (!t || t.closest(".doodle-note, .doodle-ask")) return;  // the box's ↑ is ours, not a click on the page
       if (marks.length) keep(grabbed);  // the drawing so far, as the screen was when the button went down
       (steps.length ? steps.at(-1).then : first).push(clicked(t, (frameEl || t).closest("[data-card]")?.dataset.card));
       render();
@@ -376,7 +388,7 @@ export default async function (page) {
     if (!on || erasing) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
       const m = marks.pop();
-      if (m) { m.el.remove(); show(); e.preventDefault(); }
+      if (m) { m.el.remove(); show(); later(); e.preventDefault(); }
       return;
     }
     if (e.key.length === 1 && e.key !== " " && !e.ctrlKey && !e.metaKey && !e.altKey && over) {
@@ -421,13 +433,37 @@ export default async function (page) {
   }
 
   // ---- send: Enter in the message line takes the doodles along (the page's own send is for plain words) ----
-  document.addEventListener("submit", async (e) => {
+  document.addEventListener("submit", (e) => {
     if (e.target !== form) return;
     if (!steps.length && !marks.length) { if (input.value.trim()) page.send({ type: "doodle_dim" }); return; }  // plain words: answered groups step back
     e.preventDefault();
     e.stopPropagation();
     const text = input.value;
     input.value = "";
+    sendAll(text);
+  }, true);
+  // Ctrl+Enter anywhere sends the doodles (with the box's words, else the message line's)
+  document.addEventListener("keydown", (e) => {
+    if (!((e.ctrlKey || e.metaKey) && e.key === "Enter") || (!steps.length && !marks.length)) return;
+    e.preventDefault();
+    const text = ask?.querySelector("input").value || input.value;
+    input.value = "";
+    sendAll(text);
+  });
+  // Held marks: a copy of what was drawn stays on the page from Enter until the saved group is drawn (the step's picture
+  // uploads first), so the drawing doesn't blink out and back
+  let held = [];
+  function hold() {
+    drop();
+    if (marks.some((m) => !m.text)) held.push(area.appendChild(ink.cloneNode(true)));
+    for (const m of marks) if (m.text) held.push(area.appendChild(m.el.cloneNode(true)));
+    const these = held;
+    setTimeout(() => { if (held === these) drop(); }, 15000);  // no answer from the server: don't leave them forever
+  }
+  function drop() { for (const el of held) el.remove(); held = []; }
+  async function sendAll(text) {
+    hideAsk();
+    if (marks.length) hold();
     const r1 = (n) => Math.round(n * 10) / 10;
     const kept = marks.map((m) => ({ kind: m.text ? "words" : "line", points: m.points.map((q) => ({ x: r1(q.x), y: r1(q.y) })), ...(m.text && { text: m.text }) }));
     for (const m of kept) Object.assign(m, say(m));  // before keep() takes them off the page
@@ -442,7 +478,29 @@ export default async function (page) {
     page.send({ type: "doodle_send", to: document.getElementById("to")?.value, text, first: before, marks: kept, board: board(),
                 steps: sent.map((s) => ({ shot: s.shot?.path || null, area: s.area, drawn: s.drawn, words: s.words, then: s.then, board: s.board })) });
     allOff();
-  }, true);
+  }
+
+  // ---- the box: a moment after the user stops drawing, a box by the last mark asks for words; Enter there sends.
+  // Drawing or writing again tucks it away (it comes back after the next pause); Esc closes it, the marks stay. ----
+  let ask = null, askTimer = null;
+  function later() { clearTimeout(askTimer); if (marks.length) askTimer = setTimeout(showAsk, 1100); }
+  function hideAsk() { clearTimeout(askTimer); ask?.remove(); ask = null; }
+  function showAsk() {
+    if (!marks.length || document.querySelector(".doodle-note[contenteditable='true']")) return;  // still writing words
+    hideAsk();
+    const last = marks.at(-1).points.at(-1), to = document.getElementById("to")?.value || "agent1";
+    ask = Object.assign(document.createElement("form"), { className: "doodle-ask" });
+    const m = area.getBoundingClientRect(), room = inMain(m.left + area.clientWidth - 316, m.bottom - 140);  // inside the view (not under the scrollbar)
+    Object.assign(ask.style, { left: `${Math.min(last.x + 16, room.x)}px`, top: `${Math.min(last.y + 12, room.y)}px` });
+    const field = Object.assign(document.createElement("input"), { placeholder: `Say something… (Enter sends to ${to})`, autocomplete: "off" });
+    field.setAttribute("aria-label", "Words to send with your marks");
+    const go = Object.assign(document.createElement("button"), { type: "submit", textContent: "↑", title: `Send to ${to} (Enter)` });
+    ask.append(field, go);
+    ask.onsubmit = (e) => { e.preventDefault(); sendAll(field.value); };
+    field.onkeydown = (e) => { e.stopPropagation(); if (e.key === "Escape") hideAsk(); };
+    for (const t of ["pointerdown", "click"]) ask.addEventListener(t, (e) => e.stopPropagation());
+    area.append(ask);
+  }
 
   // ---- the shared board: saved groups (the user's marks after Enter, the agents' marks), from the server ----
   // A group's marks sit in one container in the main space (data-board: the board extension puts it on its board),
@@ -500,7 +558,9 @@ export default async function (page) {
         const tr = el.closest("tr"), row = tr && tr !== el && short(tr.innerText, 60);  // a cell's text alone ("$0", "Food") doesn't say which row
         // the row's longest cell names it best ("Drinks, Golden Gai"): it stays when a quantity or price in it changes
         const key = tr && [...tr.children].map((c) => c.innerText.trim()).filter(Boolean).sort((x, y) => y.length - x.length)[0];
-        const how = text ? { card, text, ...(key && { row: key }) } : named ? { card, element: named } : { card };
+        const label = el.getAttribute?.("aria-label");  // a field's label ("Year 8") names it better than its words ("1994")
+        const how = named ? { card, element: named } : label ? { card, element: `[aria-label="${CSS.escape(label)}"]` }
+          : text ? { card, text, ...(key && { row: key }) } : { card };
         out.push({ name: what + (row && row !== text ? ` (row: ${row})` : card ? ` (card ${card})` : ""), box, el, leaf: true, how });  // "in <block> (card)" says the card
       }
     }
@@ -510,8 +570,14 @@ export default async function (page) {
   // anchor is the thing the mark is most about (what it rings, underlines, starts from, is written on) and where it
   // is now, so the mark can move with it when the page reflows (a row moved up, a card dragged).
   function say(m) {
-    const t = describe(m);
-    return { said: t.said, ...(t.on?.how?.card && { anchor: { ...t.on.how, at: { x: Math.round(t.on.box.x), y: Math.round(t.on.box.y) } } }) };
+    const t = describe(m), how = t.on?.how && { ...t.on.how };
+    if (how?.text) {  // the same words in several places ("1994" twice): remember which one
+      const all = find(how, true), b = t.on.box;
+      const i = Array.isArray(all) ? all.findIndex((x) => inBox(b, centre(x.box), 2)) : -1;
+      if (all.length > 1 && i >= 0) how.nth = i;
+    }
+    const at = how && (find(how).box ?? t.on.box);  // where it is now, measured as it will be found again
+    return { said: t.said, ...(how?.card && { anchor: { ...how, at: { x: Math.round(at.x), y: Math.round(at.y) } } }) };
   }
   function describe(m) {
     const T = things(), leaves = T.filter((t) => t.leaf), b = boxOf(m.points), size = (t) => t.box.w * t.box.h;
@@ -547,8 +613,10 @@ export default async function (page) {
       + (over.length ? `, passing over ${names(over)}` : "") + where + at, on: from ?? to ?? inside };
   }
 
-  // A thing an agent names ({card, block, element, text, mark, note}) -> {box (main px), board} or {error}
-  function find(t) {
+  // A thing an agent names ({card, block, element, text, mark, note}) -> {box (main px), board} or {error}.
+  // An anchor of the user's mark may add row (the table row's longest cell) or nth (which of the same words).
+  // every: with text, all the places that have it, in page order (for nth)
+  function find(t, every = false) {
     if (t.mark) {
       const m = saved.marks[t.mark];
       if (!m) return { error: `no mark '${t.mark}'` };
@@ -591,23 +659,31 @@ export default async function (page) {
       what = `the row "${t.row}"`;
     }
     const brd = Number((found.fr || found.el).closest?.("[data-board]")?.dataset.board) || Number(board());
-    if (t.text) {  // the words themselves: the smallest text that has them, just those characters
-      const want = t.text.trim().toLowerCase().replace(/\s+/g, " ");
-      let best = null;
+    if (t.text) {  // the words themselves: every place that has them, just those characters
+      const want = t.text.trim().toLowerCase().replace(/\s+/g, " "), all = [];
       for (const sc of found.el === area ? scopes(area) : found.el.localName === "iframe" ? scopes(found.el).slice(1) : [{ root: found.el, fr: found.fr }, ...scopes(found.el).slice(1)]) {
         const walk = sc.root.ownerDocument.createTreeWalker(sc.root, NodeFilter.SHOW_TEXT);
         for (let n; (n = walk.nextNode());) {
           if (n.parentElement?.closest(".doodle-group, .doodle-note, .card-label, .card-back, .note-pin, script, style")) continue;
-          // every board counts (the pages asked may show other boards); the board shown wins, then the shortest text
-          const i = n.data.toLowerCase().replace(/\s/g, " ").indexOf(want), off = offBoard(sc.fr || n.parentElement);
-          if (i < 0 || (best && (off > best.off || (off === best.off && n.data.length >= best.len)))) continue;
+          const i = n.data.toLowerCase().replace(/\s/g, " ").indexOf(want);
+          if (i < 0) continue;
           const range = sc.root.ownerDocument.createRange();
           range.setStart(n, i);
           range.setEnd(n, i + want.length);
           const box = rectOf(range, sc.fr);
-          if (box.w > 0 && box.h > 0) best = { box, len: n.data.length, off };
+          if (box.w > 0 && box.h > 0) all.push({ box, len: n.data.length, off: offBoard(sc.fr || n.parentElement) });
+        }
+        // words in a field (an app's editable title, a form): not text in the page, but what the user sees
+        for (const f of sc.root.querySelectorAll("input, textarea, select")) {
+          const v = (f.localName === "select" ? f.selectedOptions[0]?.text ?? "" : f.value ?? "").toLowerCase().replace(/\s+/g, " ");
+          const box = v.includes(want) && rectOf(f, sc.fr);
+          if (box && box.w > 0 && box.h > 0) all.push({ box, len: v.length, off: offBoard(sc.fr || f) });
         }
       }
+      if (every) return all;
+      // which one: the nth (an anchor that knows the same words show more than once), else the board shown, the shortest text
+      const best = t.nth != null && all[t.nth] ? all[t.nth]
+        : all.reduce((b, m) => (!b || m.off < b.off || (m.off === b.off && m.len < b.len) ? m : b), null);
       return best ? { box: best.box, board: brd } : { error: `no text "${t.text}" in ${what}` };
     }
     if (found.el === area) return { error: "name a card, block, element, text or mark" };
@@ -735,7 +811,9 @@ export default async function (page) {
     if (!b) return;
     const c = Object.assign(document.createElement("button"), { className: "chip", textContent: "✓", type: "button",
       title: "Done: clear these marks (yours and the agent's). You can bring them back from the chat log." });
-    Object.assign(c.style, { left: `${b.x + b.w - 18}px`, top: `${Math.max(0, b.y - 4)}px` });  // the box's corner: a ring leaves it empty
+    // by the user's marks: the box's corner (a ring leaves it empty); only the agent's: just outside, clear of its ticks
+    Object.assign(c.style, yours.length ? { left: `${b.x + b.w - 18}px`, top: `${Math.max(0, b.y - 4)}px` }
+                                        : { left: `${b.x + b.w + 8}px`, top: `${Math.max(0, b.y - 22)}px` });
     c.onclick = (e) => { e.stopPropagation(); page.send({ type: "doodle_clear", group: id }); };
     el.append(c);
   }
@@ -785,6 +863,7 @@ export default async function (page) {
     .observe(log, { childList: true, subtree: true });
 
   page.on("doodle_group", ({ group, marks: added, ...g }) => {
+    if (added) drop();  // a new group of the user's: drawn below, so the held copy goes
     const before = saved.groups[group];
     saved.groups[group] = g;
     Object.assign(saved.marks, added || {});

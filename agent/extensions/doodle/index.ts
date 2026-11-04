@@ -175,7 +175,7 @@ export default function (pi: ExtensionAPI) {
       if (a.gesture === "arrow" && !a.to) return result("error: an arrow needs to (the thing it points at)");
       if (a.gesture === "none" && !a.words) return result("error: gesture none needs words");
       if (!named(a.on)) return result("error: on names nothing: give card, block, element, text, mark or note");
-      if (a.group && !D.groups[a.group]) return result(`error: no group '${a.group}'. Groups: ${Object.keys(D.groups).join(", ") || "none"}`);
+      if (a.group && !D.groups[a.group]) return result(`error: no group '${a.group}'. Leave group out: your marks then join the group of the message you are answering, or a new group of your own.`);
       const where = await check(a.on);
       if (where?.error) return result(`error: ${where.error} (on: ${named(a.on)}). Name it as it is on the page: a card id, a block id, an element's id or data-name, or its exact text.`);
       const to = a.to ? await check(a.to) : null;
