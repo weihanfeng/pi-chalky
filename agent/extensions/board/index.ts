@@ -66,23 +66,27 @@ export default function (pi: ExtensionAPI) {
     description: "List the boards, what is on each, and the board the user is on. With a board: that one in detail.",
     parameters: Type.Object({ board: Type.Optional(Type.Number()) }),
     async execute(_id, a) {
-      // what has a board: cards (card/), frames not filled yet (frame/), open notes (note/); doodles aren't kept
+      // what has a board: cards (card/), frames not filled yet (frame/), open notes (note/), marks not cleared (doodle/)
       const of = (m: any) => Object.entries(m ?? {}) as [string, any][];
-      const kinds = (n: number) => [of(host.shared.get("card")?.cards), of(host.shared.get("frame")?.frames), of(host.shared.get("note")?.open)]
+      const kinds = (n: number) => [of(host.shared.get("card")?.cards), of(host.shared.get("frame")?.frames),
+                                    of(host.shared.get("note")?.notes).filter(([, r]) => r.state === "open"),
+                                    of(host.shared.get("doodle")?.groups).filter(([, r]) => r.state !== "cleared")]
         .map((list) => list.filter(([, r]) => (r.board ?? 1) === n));
       const head = `the user is on board ${host.api.board.current()}`;
       if (a.board === undefined)
         return result([head, ...host.api.board.list().map((n: number) => {
-          const [s, f, notes] = kinds(n);
-          return `${n}  ${[s.map(([id]) => id).join(", "), f.map(([id]) => id).join(", "), notes.map(([id]) => `note ${id}`).join(", ")]
+          const [s, f, notes, marks] = kinds(n);
+          return `${n}  ${[s.map(([id]) => id).join(", "), f.map(([id]) => id).join(", "), notes.map(([id]) => `note ${id}`).join(", "),
+                           marks.map(([id]) => `marks ${id}`).join(", ")]
             .filter(Boolean).join(" · ") || "(empty)"}`;
         })].join("\n"));
       if (!host.api.board.has(a.board)) return result(`error: no board ${a.board}. Boards: ${host.api.board.list().join(", ")}`);
-      const [s, f, notes] = kinds(a.board);
+      const [s, f, notes, marks] = kinds(a.board);
       return result([head, `board ${a.board}:`,
         ...s.map(([id, r]) => `  card ${id} · by ${r.owner} · place ${JSON.stringify(r.place)}${r.pinned ? " · pinned" : ""}`),
         ...f.map(([id, r]) => `  frame ${id} "${r.text}" · ${r.sent ? `sent to ${r.to}` : "not sent"} · place ${JSON.stringify({ x: r.x, y: r.y, width: r.width, height: r.height })}`),
-        ...notes.map(([id, r]) => `  note ${id} "${r.text}" · to ${r.to}`)].join("\n") + (s.length + f.length + notes.length ? "" : "\n  (empty)"));
+        ...notes.map(([id, r]) => `  note ${id} "${r.thread[0]?.text}" · to ${r.to}`),
+        ...marks.map(([id, r]) => `  marks ${id} (${r.state}) · ${r.label}`)].join("\n") + (s.length + f.length + notes.length + marks.length ? "" : "\n  (empty)"));
     },
   });
 

@@ -5,10 +5,13 @@
 // The user sees only the box; the target goes to the agent with the note: card and block (from
 // card/browser.js's data-card / data-block), the element itself (also inside app frames, which are same-origin),
 // its text, the source file to edit, the spot (main-space px; on empty space the spot is the whole target),
-// and the area if drawn. Enter sends it (point.py passes it to the card's owner, gives it an id and
-// tells every open page to pin it, with its drawing). The pin fades when the agent marks the note
-// done (event "note_done") or the user closes it with its ✕; open notes are redrawn after a reload.
-// Esc or the button turns it off.
+// and the area if drawn. Enter sends it (index.ts passes it to the card's owner, gives it an id and
+// tells every open page to pin it, with its drawing). Esc or the button turns it off.
+// Pins: a numbered pin per note (the agents' in their colour), on the thing it is on, scrolling with the main space
+// and moving with its card. Click one for its thread: who wrote what, a reply box (Enter sends it to the note's
+// agent), ✓ Done; a closed note stays as a faded ✓ (Reopen, or Delete for good). An agent's reply opens the bubble while
+// the note stays open. Show marks (doodle/)
+// hides the pins with the other marks.
 // The same note box opens for two more things (Enter on an empty box sends its faded suggestion):
 //   combine  card/browser.js fires "card-combine" {a, b, x, y} when a card is dropped onto another: the note
 //            says how to combine them and goes to b's owner as note_combine (b changes; a stays)
@@ -208,40 +211,145 @@ export default async function (page) {
   input.onkeydown = (e) => {
     const text = input.value.trim() || current?.suggestion;
     if (e.key !== "Enter" || !text || !current) return;
-    const { suggestion, ...note } = current;
+    const { suggestion, x, y, stroke: drawn, ...note } = current;
+    // where the pin goes, in main px (so it scrolls with the cards), and where on its card (so it moves with it)
+    const at = inMain(x, y), cardEl = note.target?.card && document.querySelector(`[data-card="${CSS.escape(note.target.card)}"]`);
+    const c = cardEl && inMain(cardEl.getBoundingClientRect().left, cardEl.getBoundingClientRect().top);
     page.send({ ...note, text, to: note.to || document.getElementById("to")?.value,  // else the agent picked in the chat
-                board: Number(document.body.dataset.board) || 1 });  // the board shown (board/): what it points at is on it
+                board: Number(document.body.dataset.board) || 1,  // the board shown (board/): what it points at is on it
+                at, ...(c && { anchor: { card: note.target.card, dx: at.x - c.x, dy: at.y - c.y } }),
+                stroke: drawn ? drawn.map(([px, py]) => { const q = inMain(px, py); return [q.x, q.y]; }) : null });
     setOn(false);
   };
 
-  const pins = {};  // note id -> pin element: its label, and its drawing if it has one
-  function pin({ id, text, to, x, y, stroke, board }) {  // stays where the note was written (doesn't follow scrolling yet)
-    if (pins[id]) return;
-    const el = (pins[id] = document.createElement("div"));
-    el.dataset.board = board ?? 1;  // shown only on its board (board/)
-    el.style.cssText = "position:fixed;inset:0;z-index:9997;pointer-events:none;transition:opacity 1.5s";
-    if (stroke) el.append(strokeSvg(stroke));
-    const label = document.createElement("div");
-    label.style.cssText = `position:absolute;left:${x}px;top:${y}px;max-width:240px;` +
-      "background:#fff8c4;border:1px solid #e6c200;border-radius:4px;padding:3px 20px 3px 6px;font:12px sans-serif;" +
-      "box-shadow:0 1px 3px #0003";
-    label.textContent = `✎ ${text} · sent to ${to}`;
-    const close = document.createElement("button");
-    close.textContent = "✕";
-    close.title = "Close this note (its agent is told)";
-    close.style.cssText = "position:absolute;top:1px;right:3px;line-height:1;pointer-events:auto;border:0;background:none;cursor:pointer;padding:0 2px;font:inherit;color:#8a7400";
-    close.onclick = () => page.send({ type: "note_dismiss", id });
-    label.append(close);
-    el.append(label);
-    document.body.append(el);
+  // ---- pins: a numbered pin per note on the thing it is on; click it for its thread (the bubble) ----
+  // A pin lives in the main space (data-board: on its board), so it scrolls with the cards. A user's note sits where
+  // they clicked on its card (anchor), an agent's on the thing it named (target, found by doodle's find); else at.
+  let marks = null;
+  page.use("marks").then((m) => { marks = m; layout(); });
+  const colour = (a) => marks?.colour(a) ?? "#0071e3";
+  const css = document.createElement("style");
+  css.textContent = `
+    .note-pin { position: absolute; left: 0; top: 0; width: 0; height: 0; overflow: visible; z-index: 100002; }
+    .note-pin > svg { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+    .note-pin > svg polyline { fill: none; stroke: #f5b700; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: .85; }
+    .note-pin > .pin { position: absolute; width: 22px; height: 22px; border-radius: 50% 50% 50% 4px; display: grid; place-items: center;
+      font: 600 11px/1 -apple-system, system-ui, sans-serif; color: #fff; background: var(--c); box-shadow: 0 1px 4px rgba(0, 0, 0, .3); cursor: pointer; }
+    .note-pin.done > .pin { opacity: .45; }
+    .note-pin.done > svg { opacity: .3; }
+    .note-pin .bubble { position: absolute; width: 260px; padding: 10px 12px; border-radius: 12px; font-size: 13px; color: var(--text, #1d1d1f);
+      background: var(--glass-strong, #fff); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); border: 1px solid var(--edge, #eee);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, .14); }
+    .note-pin .bubble .entry { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .note-pin .bubble .entry b { font-weight: 600; margin-right: 6px; }
+    .note-pin .bubble .busy { color: var(--muted, #888); font-style: italic; }
+    .note-pin .bubble textarea { width: 100%; box-sizing: border-box; min-height: 48px; resize: vertical; font: inherit; padding: 6px 8px;
+      border-radius: 8px; border: 1px solid rgba(0, 0, 0, .15); outline: none; background: rgba(255, 255, 255, .8); }
+    .note-pin .bubble .acts { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+    .note-pin .bubble .acts button { padding: 3px 10px; border-radius: 999px; font-size: 12px; border: 1px solid rgba(0, 0, 0, .12); }
+    .note-pin .bubble .acts button.primary { color: #fff; background: var(--accent, #0071e3); border-color: transparent; }`;
+  document.head.append(css);
+  const notes = {}, pins = {};  // note id -> the note; -> its element
+  let openId = null, busy = {};   // the open bubble; agent -> working? (from "status")
+  const drafts = {};              // note id -> what is typed in its reply box (kept when the bubble is redrawn)
+
+  function where(id) {  // the pin's spot, main px
+    const n = notes[id];
+    if (n.target && marks) { const f = marks.find(n.target); const b = f.box || n.box; if (b) return { x: b.x + b.w - 4, y: b.y - 16 }; }
+    if (n.target && n.box) return { x: n.box.x + n.box.w - 4, y: n.box.y - 16 };
+    const card = n.anchor && document.querySelector(`[data-card="${CSS.escape(n.anchor.card)}"]`);
+    if (card) { const r = card.getBoundingClientRect(), c = inMain(r.left, r.top); return { x: c.x + n.anchor.dx, y: c.y + n.anchor.dy }; }
+    return n.at ?? { x: 0, y: 0 };
   }
-  page.on("note_pin", pin);
-  page.on("note_done", ({ id }) => {
-    const el = pins[id];
-    if (!el) return;
-    delete pins[id];
-    el.style.opacity = "0";
-    setTimeout(() => el.remove(), 1500);
+  function draw(id) {
+    const n = notes[id];
+    let el = pins[id];
+    if (!el) {
+      el = pins[id] = Object.assign(document.createElement("div"), { className: "note-pin" });
+      el.dataset.note = id;
+      page.slot("top").append(el);
+    }
+    el.dataset.board = n.board ?? 1;
+    el.classList.toggle("done", n.state !== "open");
+    el.style.setProperty("--c", n.by === "user" ? "#e0a800" : colour(n.by));
+    el.replaceChildren();
+    const p = where(id), base = n.at ?? p;
+    if (n.stroke) {  // the user's drawing, moved with the pin
+      const svg = document.createElementNS(SVG, "svg"), line = document.createElementNS(SVG, "polyline");
+      line.setAttribute("points", n.stroke.map(([sx, sy]) => `${sx + p.x - base.x},${sy + p.y - base.y}`).join(" "));
+      svg.append(line);
+      el.append(svg);
+    }
+    const b = Object.assign(document.createElement("button"), { className: "pin", type: "button", textContent: n.state === "open" ? id.slice(1) : "✓",
+      title: `${n.thread[0]?.text ?? ""}${n.state === "open" ? "" : " (closed)"}` });
+    Object.assign(b.style, { left: `${p.x}px`, top: `${p.y}px` });
+    b.onclick = (e) => { e.stopPropagation(); openId = openId === id ? null : id; for (const k of Object.keys(pins)) draw(k); };
+    el.append(b);
+    el.dataset.at = `${Math.round(p.x)},${Math.round(p.y)}`;
+    if (openId === id) el.append(bubble(id, p));
+  }
+  function bubble(id, p) {
+    const n = notes[id], d = Object.assign(document.createElement("div"), { className: "bubble" });
+    const room = page.slot("top").scrollWidth;
+    Object.assign(d.style, { left: `${Math.max(4, Math.min(room - 270, p.x - 110))}px`, top: `${p.y + 28}px` });
+    for (const ev of ["pointerdown", "mousedown", "click"]) d.addEventListener(ev, (e) => e.stopPropagation());
+    for (const t of n.thread) {
+      const e = Object.assign(document.createElement("div"), { className: "entry" });
+      const who = Object.assign(document.createElement("b"), { textContent: t.by === "user" ? "you" : t.by });
+      who.style.color = t.by === "user" ? "#a07800" : colour(t.by);
+      e.append(who, document.createTextNode(t.text));
+      d.append(e);
+    }
+    if (n.state === "open" && n.thread.at(-1)?.by === "user" && busy[n.to])
+      d.append(Object.assign(document.createElement("div"), { className: "entry busy", textContent: `${n.to} is working…` }));
+    const acts = Object.assign(document.createElement("div"), { className: "acts" });
+    const button = (text, fn, primary = false) => {
+      const b = Object.assign(document.createElement("button"), { type: "button", textContent: text, className: primary ? "primary" : "" });
+      b.onclick = fn;
+      acts.append(b);
+    };
+    if (n.state === "open") {
+      const ta = Object.assign(document.createElement("textarea"), { placeholder: "Reply… (Enter sends)", value: drafts[id] ?? "" });
+      ta.oninput = () => { drafts[id] = ta.value; };
+      const go = () => { const t = ta.value.trim(); if (t) { page.send({ type: "note_reply", id, text: t }); ta.value = drafts[id] = ""; } };
+      ta.onkeydown = (e) => {
+        e.stopPropagation();
+        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); go(); }
+        if (e.key === "Escape") { openId = null; draw(id); }
+      };
+      d.append(ta);
+      button("✓ Done", () => { openId = null; page.send({ type: "note_close", id }); });
+      button("Reply", go, true);
+      setTimeout(() => ta.focus(), 0);
+    } else {
+      button("Delete", () => { if (confirm("Delete this note for good?")) { openId = null; page.send({ type: "note_delete", id }); } });
+      button("Reopen", () => page.send({ type: "note_reopen", id }));
+    }
+    d.append(acts);
+    return d;
+  }
+  function layout() {  // things move (a card dragged, a row redrawn): pins follow
+    for (const id of Object.keys(pins)) {
+      const p = where(id);
+      if (pins[id].dataset.at !== `${Math.round(p.x)},${Math.round(p.y)}` && openId !== id) draw(id);
+    }
+  }
+  setInterval(layout, 1500);
+  page.on("note_pin", ({ id, type, agent, ts, ...n }) => {
+    const reply = notes[id] && n.thread.length > notes[id].thread.length && n.thread.at(-1).by !== "user" && n.state === "open";  // an answer still waiting on the user
+    notes[id] = n;
+    if (reply && openId !== id) openId = id;  // an agent answered in the thread: show it
+    if (openId === id && n.state !== "open" && n.thread.at(-1)?.by !== "user") openId = null;  // and closed it: done, so out of the way
+    draw(id);
   });
-  try { for (const [id, n] of Object.entries(await (await fetch("/note/all")).json())) pin({ id, ...n }); } catch {}
+  page.on("note_gone", ({ id }) => { pins[id]?.remove(); delete pins[id]; delete notes[id]; });
+  page.on("status", ({ agents }) => {
+    const was = openId && busy[notes[openId]?.to];
+    busy = Object.fromEntries(Object.entries(agents).map(([a, s]) => [a, s.state !== "idle"]));
+    if (openId && pins[openId] && was !== busy[notes[openId]?.to]) draw(openId);  // only when "… is working" changes
+  });
+  document.addEventListener("pointerdown", (e) => {  // a click elsewhere closes the bubble
+    if (openId && !e.target.closest?.(".note-pin")) { const id = openId; openId = null; if (pins[id]) draw(id); }
+  });
+  try { for (const [id, n] of Object.entries(await (await fetch("/note/all")).json())) { notes[id] = n; draw(id); } } catch {}
 }

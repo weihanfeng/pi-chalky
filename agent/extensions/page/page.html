@@ -16,7 +16,8 @@
     #side     right edge: empty; a browser plugin fills it (the files plugin's file panel).
   Look: glass layers on one soft background, tokens in :root (colours, glass, blur, sizes); icons are inline
   SVG from ICONS (data-icon="name").
-  Messages: only words are full text (the user's, and an agent's reply); everything else an agent does
+  Messages: only words are full text (the user's, and an agent's reply); a message the page wrote for the user
+  ("[note on the page] ...") shows their words, the whole text in its data-raw (plugins find their ids there); everything else an agent does
   (reasoning, tool calls, results, messages between agents) is a small icon: hover to peek, click to read.
   App agents (status "app": part of something built, e.g. a simulation's members) stay out of the messages,
   the picker and the working rows (one row per app): their app shows their talk.
@@ -24,7 +25,7 @@
   "status", "message", "version", errors. Sending: {to, text} is a message, {type: "stop"} stops all.
   Extending without editing this file: an extension's browser.js (extensions/<name>/browser.js; GET /page/scripts lists them);
   each script's default export gets pageApi: on(type, fn), send(obj) (-> the extensions' page handlers),
-  slot("top" | "status" | "side"), tool(button) -> the row under that palette tool (for its sub-tools), note(text), load(name), block(name, props) (blocks from extensions/card/blocks),
+  slot("top" | "status" | "side"), tool(button) -> the row under that palette tool (for its sub-tools), note(text) -> the line, load(name), block(name, props) (blocks from extensions/card/blocks),
   command(name, fn, description): "/name rest" typed in the input calls fn(rest) instead of sending (other "/..." text
   is sent); typing "/" lists the commands above the input, narrowing as you type.
   provide(name, obj) / use(name) -> promise of obj: what one browser plugin offers others (scripts load in any
@@ -325,6 +326,7 @@
     block("Markdown", { text: words }).then((el) => el && follow(() => span.replaceWith(el)));
     if (who !== "you" && document.body.dataset.panel !== "messages")
       document.getElementById("unread").textContent = ++unread;
+    return div;
   }
 
   function step(agent, kind, title, content, error = false) {  // one icon in the agent's row; click to read it
@@ -351,8 +353,10 @@
     });
   }
 
-  function note(words) {  // a quiet line: joined, saved a version, errors, ...
-    follow(() => log.append(Object.assign(document.createElement("div"), { className: "note", textContent: words })));
+  function note(words) {  // a quiet line: joined, saved a version, errors, ... (returns it, for a plugin to act on)
+    const line = Object.assign(document.createElement("div"), { className: "note", textContent: words });
+    follow(() => log.append(line));
+    return line;
   }
 
   // ---- Working: animated dots for each agent that isn't idle (from "status" events), Stop beside them
@@ -437,7 +441,7 @@
         // show their words; the lines meant for the agent go behind an icon
         const tagged = from === "user" && /^\[([^\]]+)\] ?(.*)/.exec(words);
         if (tagged) {
-          text("you", tagged[2] || tagged[1], agents.size > 1 ? a : null);
+          text("you", tagged[2] || tagged[1], agents.size > 1 ? a : null).dataset.raw = words;  // all of it, for plugins (doodle: its group)
           if (words.includes("\n")) step("you", "inbox", `${tagged[1]}: what ${a} got`, words);
         } else if (from === "user") text("you", words, agents.size > 1 ? a : null);
         // from another agent: already shown as its "asks"/"tells" step, or as its answer

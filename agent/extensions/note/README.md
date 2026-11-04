@@ -1,8 +1,11 @@
 # Notes on the page (the note extension)
-The user can click anything on the page and write a note there. You get "[note on the page] <their words>"
-with the target: the card and the block (the chain of block ids, outermost first), the element they clicked
-(inside app frames too), the part (if the thing has partAt), its text, and the file it comes from. Act on that
-exact thing.
+A note is a thread pinned on a thing on the page: a numbered pin, and a bubble with who wrote what, a reply box and
+✓ Done. You and the user can both start one, and both write in it.
+
+## The user's notes: "[note on the page] <their words>"
+They clicked something (or drew around it, or dropped files there) and wrote. You get the target: the card and the
+block (the chain of block ids, outermost first), the element they clicked (inside app frames too), the part (if the
+thing has partAt), its text, and the file it comes from. Act on that exact thing.
 - If the text is data (a table row, a score), change the card's data, not the block or the app's code.
 - "here" means the spot: to add something there, card_show(..., place={"x", "y"}) with its position, and keep
   it small (as wide as its content). On empty space the spot is all there is to the target.
@@ -20,4 +23,13 @@ exact thing.
   change shape. Never change or remove A: the user closes it when they want (B then gets a copy of what it read,
   automatically). Keep what B already showed unless they said otherwise.
 - Pointing is only as precise as your names: give the cards, blocks and elements you build a clear id or data-name.
-- Each note has an id. When you have dealt with it, call note_done(id): its pin fades from the page.
+
+## Threads
+- Answer a note in its thread: note_reply(id, text), any length. Don't repeat it in chat; your chat can be empty.
+- Their reply in a thread comes as "[note reply on the page] <words>", with the note's id and the thread so far.
+- Start a thread yourself with note_add(on, text) when there is something to explain or ask about one thing
+  ("this total leaves out tax: add it?"). on is as doodle_mark's: {card, block, element, text, mark}. For a short
+  pointer ("this one") use the pen (doodle_mark) instead.
+- When you did what a note asked, note_done(id): its pin turns into a faded ✓, which the user can reopen or delete. If your
+  answer leaves anything to them (you suggest something, ask, or offer a choice), leave the note open: their reply
+  comes in the same thread, and you close it once that is settled. The user can close one too (✓ Done); you get an fyi.
