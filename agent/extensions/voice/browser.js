@@ -16,6 +16,7 @@ export default function (page) {
   const button = document.createElement("button");
   button.type = "button";  // in the form: not a send
   button.className = "mic";
+  button.dataset.name = "dictate";
   button.title = "Dictate";
   button.innerHTML = MIC;
   input.after(button);

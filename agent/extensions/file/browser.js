@@ -47,6 +47,7 @@ export default async function (page) {
 
   const toggle = document.createElement("button");
   toggle.className = "file-toggle";
+  toggle.dataset.name = "files";
   toggle.title = "Files: drop files anywhere on the page; drag a name onto the page to use it there";
   toggle.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
   const list = document.createElement("div");

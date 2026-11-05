@@ -14,6 +14,8 @@
               A tool with sub-tools (frames' Implement) is a <span class="tool">: its button, then a
               smaller row (.sub) that hangs directly under it, hidden while none of its buttons shows (pageApi.tool).
     #side     right edge: empty; a browser plugin fills it (the files plugin's file panel).
+  Names (data-name) an agent's pen can point at: tools (the palette), rail, messages, versions, message-line; the
+  palette's buttons get theirs from their plugins (pen, text, eraser, show-marks, note, frames, files, dictate).
   Look: glass layers on one soft background, tokens in :root (colours, glass, blur, sizes); icons are inline
   SVG from ICONS (data-icon="name").
   Messages: only words are full text (the user's, and an agent's reply); a message the page wrote for the user
@@ -188,9 +190,9 @@
 </style>
 <body data-panel="messages">
 <div id="top"></div>
-<nav id="rail">
-  <button id="show-messages" data-icon="messages" title="Messages"><span class="badge" id="unread"></span></button>
-  <button id="show-versions" data-icon="versions" title="Versions"></button>
+<nav id="rail" data-name="rail">
+  <button id="show-messages" data-name="messages" data-icon="messages" title="Messages"><span class="badge" id="unread"></span></button>
+  <button id="show-versions" data-name="versions" data-icon="versions" title="Versions"></button>
 </nav>
 <aside id="panel">
   <section id="messages"><div id="log"></div></section>
@@ -202,13 +204,13 @@
   </section>
 </aside>
 <div id="working" hidden><div id="busy"></div><button id="stop" data-icon="stop" title="Stop all agents"></button></div>
-<form id="f">
+<form id="f" data-name="message-line">
   <div id="cmds" hidden></div>
   <select id="to" title="Send to" hidden></select>
   <input id="text" placeholder="Tell the agents what to build or change" autocomplete="off">
   <button data-icon="send" title="Send"></button>
 </form>
-<nav id="status"></nav>
+<nav id="status" data-name="tools"></nav>
 <aside id="side"></aside>
 <script>
   const log = document.getElementById("log"), to = document.getElementById("to");

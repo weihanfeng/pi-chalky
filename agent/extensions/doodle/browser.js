@@ -83,6 +83,7 @@ export default async function (page) {
     .doodle-group .chip { position: absolute; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; pointer-events: auto;
                           font-size: 12px; color: #fff; background: #1d1d1f; box-shadow: 0 1px 4px rgba(0, 0, 0, .25); cursor: pointer; opacity: .55; }
     .doodle-group .chip:hover { opacity: 1; }
+    .doodle-group.doodle-fixed { position: fixed; z-index: 100004; }
     .doodle-group.dim { opacity: .35; }
     .doodle-group.gone { opacity: 0; }
     .doodle-group.ghost { opacity: .4; }
@@ -122,6 +123,9 @@ export default async function (page) {
   try { hiddenAtStart = !!localStorage.getItem("chalky-marks-hidden"); } catch {}
   showMarks(!hiddenAtStart);
   showButton.onclick = () => showMarks(document.body.classList.contains("marks-hidden"));
+  // names an agent's pen can point at (doodle_mark on: {element: "pen"}): the page's own controls
+  Object.assign(button.dataset, { name: "pen" }); Object.assign(textButton.dataset, { name: "text" });
+  Object.assign(eraseButton.dataset, { name: "eraser" }); Object.assign(showButton.dataset, { name: "show-marks" });
   page.slot("status").append(button, textButton, eraseButton, showButton);
   const strip = Object.assign(document.createElement("div"), { className: "doodle-strip" });
   form.insertBefore(strip, input);
@@ -236,6 +240,7 @@ export default async function (page) {
       const g = saved.groups[m.group];
       if (erased.has(id) || !g || g.state === "cleared" || String(m.board) !== board()) continue;
       const b = drawn[id];
+      if (b?.fixed) continue;  // on the page's own controls (window px): ✓ or the agent takes those away
       const pts = b?.pts ?? m.points;  // the user's marks: where they are drawn now (moved with their anchor)
       const hit = pts ? (m.kind === "words" ? inBox(boxOf(pts), p, 6) : pts.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 12))
         : b && inBox(b, p, 4);
@@ -617,6 +622,58 @@ export default async function (page) {
   // An anchor of the user's mark may add row (the table row's longest cell) or nth (which of the same words).
   // every: with text, all the places that have it, in page order (for nth)
   function find(t, every = false) {
+    if (t.at) return spot(t.at);
+    const r = findMain(t, every);
+    const missed = every ? !r.length : !!r.error;
+    if (missed && !t.card && !t.block && (t.element || t.text)) {  // not among the cards: maybe the page's own controls
+      const u = findUi(t, every);
+      if (every ? u.length : !u.error) return u;
+    }
+    return r;
+  }
+  // The page around the main space (the palette, the rail, the message line, the board shelf): fixed to the window,
+  // so a mark on one of them is drawn in window px (fixed: true) and stays put when the main space scrolls
+  const uiRoots = () => [...document.body.children].filter((c) => c !== area && c.id !== "panel"
+    && !c.matches("script, style, .doodle-group, .doodle-peek, .doodle-big, .note-pin") && c.getClientRects().length
+    && !(c.offsetWidth > innerWidth * .8 && c.offsetHeight > innerHeight * .8));  // a see-through layer over everything (viewers) isn't a control
+  const winBox = (el) => { const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; };
+  function findUi(t, every) {
+    const all = [], seen = new Set(), add = (el) => {
+      if (seen.has(el)) return;
+      seen.add(el);
+      const box = winBox(el);
+      if (box.w > 0 && box.h > 0) all.push({ box, len: (el.textContent || el.title || "").length, off: false, fixed: true });
+    };
+    // an element: a name first ("text" is the Text tool, not the message line's #text), then an id, then a selector
+    if (t.element) for (const sel of [`[data-name="${CSS.escape(t.element)}"]`, `#${CSS.escape(t.element)}`, t.element]) {
+      for (const root of uiRoots()) try { if (root.matches(sel)) add(root); root.querySelectorAll(sel).forEach(add); } catch {}  // not a valid selector
+      if (all.length) break;
+    }
+    for (const root of uiRoots()) {
+      if (t.text) {  // words on a control, or its tooltip (an icon button says what it is in its title)
+        const want = t.text.trim().toLowerCase();
+        for (const el of [root, ...root.querySelectorAll("*")])
+          if ((!el.children.length && (el.textContent || "").trim().toLowerCase().includes(want))
+              || (el.title || el.getAttribute("aria-label") || "").toLowerCase().includes(want)) add(el);
+      }
+    }
+    if (every) return all;
+    const best = all.reduce((b, m) => (!b || m.len < b.len ? m : b), null);
+    return best ? { box: best.box, board: Number(board()), fixed: true } : { error: `no ${t.element ? `element '${t.element}'` : `text "${t.text}"`} on the page` };
+  }
+  // A spot the agent read off the user's screen (screen_see): {x, y, width, height} in window px. Over the page's own
+  // controls it stays fixed to the window; over the main space it is turned into main px, so it scrolls with the cards.
+  function spot(a) {
+    const x = Number(a.x), y = Number(a.y), w = Number(a.width ?? 0), h = Number(a.height ?? 0);
+    if (![x, y, w, h].every(Number.isFinite)) return { error: "at needs numbers: {x, y, width, height} in window px" };
+    if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) return { error: `at (${x}, ${y}) is outside the window (${innerWidth}×${innerHeight})` };
+    const under = document.elementsFromPoint(x + w / 2, y + h / 2).find((e) => !e.closest(".doodle-group, svg.doodle-ink"));
+    if (under && !area.contains(under) && under !== document.documentElement && under !== document.body)
+      return { box: { x, y, w, h }, board: Number(board()), fixed: true };
+    const p = inMain(x, y);
+    return { box: { x: p.x, y: p.y, w, h }, board: Number(board()) };
+  }
+  function findMain(t, every) {
     if (t.mark) {
       const m = saved.marks[t.mark];
       if (!m) return { error: `no mark '${t.mark}'` };
@@ -640,7 +697,7 @@ export default async function (page) {
       what = `block ${t.block}`;
     }
     let found = { el, fr: null };
-    const tries = (sel) => [sel, `#${CSS.escape(sel)}`, `[data-name="${CSS.escape(sel)}"]`];
+    const tries = (sel) => [`[data-name="${CSS.escape(sel)}"]`, `#${CSS.escape(sel)}`, sel];  // a name first, then an id, then a selector
     if (t.element) {
       found = null;
       for (const sc of scopes(el)) for (const sel of tries(t.element)) {
@@ -701,7 +758,7 @@ export default async function (page) {
                                 return pt(c.x + dx * k + dx / l * 6, c.y + dy * k + dy / l * 6); };
   function gesture(g, b, t) {
     const c = centre(b), n = (k, fn) => smooth(Array.from({ length: k }, (_, i) => fn(i)));
-    if (g === "ring") { const rx = b.w / 2 + 10, ry = b.h / 2 + 7;
+    if (g === "ring") { const rx = b.w / 2 + Math.min(10, 3 + b.w * .1), ry = b.h / 2 + Math.min(7, 2 + b.h * .1);  // snug round small things
       return [n(40, (i) => { const a = (-100 + i * 9.4) * Math.PI / 180; return pt(c.x + rx * Math.cos(a) * (1 + i / 420) + wob(i), c.y + ry * Math.sin(a) + wob(i, 3)); })]; }
     if (g === "underline") return [n(12, (i) => pt(b.x - 2 + (b.w + 4) * i / 11, b.y + b.h + 4 + wob(i) * .8))];
     if (g === "strike") return [n(10, (i) => pt(b.x - 4 + (b.w + 8) * i / 9, c.y + wob(i) * .7))];
@@ -719,7 +776,7 @@ export default async function (page) {
     const w = el.offsetWidth || text.length * 9 + 10, h = el.offsetHeight || 24, room = area.scrollWidth - 8;
     const cardEl = on?.card && area.querySelector(`[data-card="${CSS.escape(on.card)}"]`), card = cardEl && rectOf(cardEl);
     const busy = [...things().filter((t) => t.leaf && !(inBox(b, centre(t.box), 2))).map((t) => t.box),
-                  ...Object.values(words).filter((x) => x.el !== el && x.el.isConnected).map((x) => x.box)];
+                  ...Object.values(words).filter((x) => x.el !== el && x.el.isConnected && !x.fixed).map((x) => x.box)];
     const free = (p) => p.x >= 4 && p.x + w <= room && p.y >= 0 && !busy.some((t) => !(p.x + w <= t.x || p.x >= t.x + t.w || p.y + h <= t.y || p.y >= t.y + t.h));
     const mid = b.y + b.h / 2 - h / 2;
     const spots = [{ x: b.x + b.w + 14, y: mid }, ...(card ? [{ x: card.x + card.w + 14, y: mid }] : []),
@@ -729,8 +786,33 @@ export default async function (page) {
     const p = spots[0];
     return { x: Math.min(p.x, room - w), y: p.y, w, h };
   }
-  const words = {};  // agent mark id -> {el, box}: its handwriting, so others step past it
+  const words = {};  // agent mark id -> {el, box, fixed}: its handwriting, so others step past it
+  // Words by a mark on the page's own controls (window px): below it, else right, left, above; inside the window
+  function placeFixed(text, b, el) {
+    const w = el.offsetWidth || text.length * 9 + 10, h = el.offsetHeight || 24;
+    const busy = [...Object.values(words).filter((x) => x.el !== el && x.el.isConnected && x.fixed).map((x) => x.box),
+                  ...uiRoots().map(winBox)];  // and not on the palette, the rail, the message line
+    const ok = (p) => p.x >= 4 && p.y >= 4 && p.x + w <= innerWidth - 4 && p.y + h <= innerHeight - 4
+      && !busy.some((t) => !(p.x + w <= t.x || p.x >= t.x + t.w || p.y + h <= t.y || p.y >= t.y + t.h));
+    const spots = [{ x: b.x + b.w / 2 - w / 2, y: b.y + b.h + 10 }, { x: b.x + b.w + 14, y: b.y + b.h / 2 - h / 2 },
+                   { x: b.x - w - 14, y: b.y + b.h / 2 - h / 2 }, { x: b.x + b.w / 2 - w / 2, y: b.y - h - 8 }];
+    for (let i = 0; i < 4; i++) for (const p of spots) { const q = { x: p.x, y: p.y + i * h }; if (ok(q)) return { ...q, w, h }; }
+    return { x: Math.max(4, Math.min(spots[0].x, innerWidth - w - 4)), y: spots[0].y, w, h };
+  }
 
+  function fixedOf(el) {  // the window-fixed twin of a group's container (marks on the palette, the rail, ...)
+    const key = (el.classList.contains("ghost") ? `${el.dataset.group}-ghost` : el.dataset.group) + "~fixed";
+    let f = containers[key];
+    if (!f) {
+      f = containers[key] = Object.assign(document.createElement("div"), { className: "doodle-group doodle-fixed" });
+      f.dataset.group = el.dataset.group;
+      f.append(document.createElementNS(SVG, "svg"));
+      document.body.append(f);  // on the body, with data-board: board/ shows it only on its board
+    }
+    f.dataset.board = el.dataset.board;
+    f.className = el.className + " doodle-fixed";
+    return f;
+  }
   function container(id, g, ghost = false) {
     const key = ghost ? `${id}-ghost` : id;
     let el = containers[key];
@@ -768,7 +850,8 @@ export default async function (page) {
   }
   // Draw one mark into its group's container (again, if it is there: its old parts go first)
   function drawMark(id, m, el, animate = false) {
-    for (const old of el.querySelectorAll(`[data-mark="${id}"]`)) old.remove();
+    for (const c of [el, containers[(el.classList.contains("ghost") ? `${el.dataset.group}-ghost` : el.dataset.group) + "~fixed"]])
+      for (const old of c?.querySelectorAll(`[data-mark="${id}"]`) ?? []) old.remove();
     const ink = INK_OF(m.by), tag = (n) => { n.dataset.mark = id; return n; };
     if (m.kind === "line" || m.kind === "words") {  // the user's: where drawn, moved as far as its anchor moved since
       const d = moved(m), pts = m.points.map((q) => ({ x: q.x + d.x, y: q.y + d.y }));
@@ -784,7 +867,14 @@ export default async function (page) {
     }
     const at = find(m.on), b = at.box || m.box;  // an agent's gesture: on the thing as it is now
     if (!b) return;
-    const t = m.to ? find(m.to).box || m.toBox : null;
+    const fixed = at.box ? !!at.fixed : !!m.fixed;  // on the page's own controls: drawn in window px, in the fixed twin
+    if (fixed) el = fixedOf(el);
+    const tt = m.to ? find(m.to) : null;
+    let t = tt?.box || m.toBox || null;
+    if (t && !!(tt?.box ? tt.fixed : m.toFixed) !== fixed) {  // the arrow's two ends in one system of px
+      const q = fixed ? inWindow({ x: t.x, y: t.y }) : inMain(t.x, t.y);
+      t = { ...t, x: q.x, y: q.y };
+    }
     const parts = gesture(m.gesture, b, t).map((d) => tag(pathIn(el, d, ink, animate)));
     const boxes = parts.map((p) => { const r = p.getBBox(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
     if (m.words) {
@@ -792,13 +882,14 @@ export default async function (page) {
       w.style.setProperty("--ink", ink);
       el.append(w);
       const near = m.gesture === "arrow" && t ? { x: (centre(b).x + centre(t).x) / 2 - 10, y: (centre(b).y + centre(t).y) / 2 - 34, w: 20, h: 20 } : b;
-      const pos = placeWords(m.words, near, w, m.on);
+      const pos = fixed ? placeFixed(m.words, near, w) : placeWords(m.words, near, w, m.on);
       Object.assign(w.style, { left: `${pos.x}px`, top: `${pos.y}px` });
-      words[id] = { el: w, box: pos };
+      words[id] = { el: w, box: pos, fixed };
       boxes.push(pos);
       if (animate) { w.style.opacity = 0; w.style.transition = "opacity .5s .5s"; requestAnimationFrame(() => { w.style.opacity = 1; }); }
     }
     drawn[id] = union(boxes) || b;
+    drawn[id].fixed = fixed;
     drawn[id].at = !at.box ? "saved box" :  // not found yet (the cards draw after this): the next look draws it again
       `${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.w)},${Math.round(b.h)}` + (t ? `>${Math.round(t.x)},${Math.round(t.y)}` : "");
   }
@@ -807,7 +898,10 @@ export default async function (page) {
     el.querySelector(":scope > .chip")?.remove();
     const mine = Object.entries(saved.marks).filter(([, m]) => m.group === id);
     const yours = mine.filter(([, m]) => m.by === "user");
-    const b = union((yours.length ? yours : mine).map(([mid]) => drawn[mid]).filter(Boolean));
+    containers[el.dataset.group + "~fixed"]?.querySelector(":scope > .chip")?.remove();
+    const inMainSpace = (yours.length ? yours : mine).map(([mid]) => drawn[mid]).filter((d) => d && !d.fixed);
+    if (!inMainSpace.length && mine.some(([mid]) => drawn[mid]?.fixed)) el = fixedOf(el);
+    const b = union(inMainSpace.length ? inMainSpace : mine.map(([mid]) => drawn[mid]).filter(Boolean));
     if (!b) return;
     const c = Object.assign(document.createElement("button"), { className: "chip", textContent: "✓", type: "button",
       title: "Done: clear these marks (yours and the agent's). You can bring them back from the chat log." });
@@ -825,6 +919,7 @@ export default async function (page) {
     if (!ghost) chip(id, el);
   }
   function dropGroup(key, fade = false) {
+    if (!key.endsWith("~fixed")) dropGroup(key + "~fixed", fade);  // and its window-fixed twin
     const el = containers[key];
     if (!el) return;
     delete containers[key];
@@ -891,7 +986,7 @@ export default async function (page) {
     delete drawn[id];
     delete words[id];
     erased.delete(id);
-    for (const n of containers[group]?.querySelectorAll(`[data-mark="${id}"]`) ?? []) n.remove();
+    for (const c of [containers[group], containers[group + "~fixed"]]) for (const n of c?.querySelectorAll(`[data-mark="${id}"]`) ?? []) n.remove();
     if (!Object.values(saved.marks).some((m) => m.group === group)) { delete saved.groups[group]; dropGroup(group); }
     else if (containers[group]) chip(group, containers[group]);
   });

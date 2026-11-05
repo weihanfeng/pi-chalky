@@ -36,10 +36,12 @@ export default async function (page) {
 
   const button = document.createElement("button");
   button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2" stroke-dasharray="3 2.5"/></svg>`;
+  button.dataset.name = "frames";  // names an agent's pen can point at (doodle_mark on: {element: "frames"})
   button.title = "Frames: drag boxes on the page and write what goes in each, then Implement them together (Esc to stop)";
   button.append(Object.assign(document.createElement("span"), { className: "badge" }));  // frames waiting, while the tool is off
   const send = document.createElement("button");
   send.className = "frame-send";
+  send.dataset.name = "implement";
   send.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 12-8.4 8.4a2.1 2.1 0 0 1-3-3L12 9"/><path d="m18 15 4-4"/>` +
     `<path d="m21.5 11.5-1.9-1.9a2 2 0 0 1-.6-1.4V7l-2.3-2.3a6 6 0 0 0-4.2-1.7H9l.9.8A6.2 6.2 0 0 1 12 8.4V10l2 2h1.2a2 2 0 0 1 1.4.6l1.9 1.9"/></svg>` +
     `<span class="badge"></span>`;  // the hammer: build these

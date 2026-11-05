@@ -93,6 +93,7 @@ export default async function (page) {
 
   // the shelf: ‹ [the thumbnails, scrolling] › +   (+ outside the scrolling part, so it is always there)
   const shelf = Object.assign(document.createElement("div"), { className: "boards-shelf" });
+  shelf.dataset.name = "boards";
   const button = (className, textContent, title, onclick) => Object.assign(document.createElement("button"), { className, textContent, title, onclick });
   const view = Object.assign(document.createElement("div"), { className: "view" });
   const track = Object.assign(document.createElement("div"), { className: "track" });
@@ -100,6 +101,7 @@ export default async function (page) {
   const prev = button("arrow", "‹", "Earlier boards", () => step(-1));
   const next = button("arrow", "›", "Later boards", () => step(1));
   const add = button("add", "+", "New board", () => { adding = true; page.send({ type: "board_add" }); });
+  add.dataset.name = "new-board";
   view.append(track);
   shelf.append(prev, view, next, add);
   document.body.append(shelf);

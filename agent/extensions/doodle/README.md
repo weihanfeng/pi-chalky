@@ -28,6 +28,12 @@ You name the thing; the page draws it by hand in your colour, and keeps it on th
 - on / to: {card, block, element, text, mark, note}, as few as name it exactly. text is the exact words shown on the
   page (the mark goes on just those characters), element a CSS selector or an element's id or data-name (also inside
   an app's frame), mark one of the marks (theirs or yours: m7). Example: {"card": "shop", "text": "12.50"}.
+- The page's own controls can be marked too, by name: {element: "pen"} (the marker), "text", "eraser", "show-marks"
+  (the eye), "note" (the note pencil), "frames", "files", "dictate" (the mic), "tools" (the whole palette, top centre),
+  "rail" (left edge), "messages", "versions", "message-line" (bottom), "boards" (the shelf above it), "new-board". Such
+  marks stay fixed to the window. Good for a tour: ring "pen" with "draw here".
+- at: {x, y, width, height} in window px, as screen_see's picture shows it: a last resort for something with no name
+  (empty space, a spot in a picture). Look first (screen_see), then mark.
 - words: at most 40 characters, handwritten beside it. Longer things go in a note (note_add).
 - group: the group you are answering; left out, the group of the message you are answering. With none (a plain
   message, a review you were asked for), your marks start a group of your own.

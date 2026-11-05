@@ -61,6 +61,7 @@ export default async function (page) {
   const button = document.createElement("button");
   button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13 7 4 4"/></svg>`;
   button.title = "Point: click anything, or hold and draw around an area, then write a note (Esc to stop)";
+  button.dataset.name = "note";  // names an agent's pen can point at
   page.slot("status").prepend(button);  // the first tool in the palette, whichever script loads first
   const setOn = (on) => {
     layer.style.display = on ? "block" : "none";

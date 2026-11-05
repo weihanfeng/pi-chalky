@@ -128,8 +128,13 @@ const Target = Type.Object({
   text: Type.Optional(Type.String({ description: "exact text shown on the page (in the card/element if given): the mark goes on just those words" })),
   mark: Type.Optional(Type.String({ description: "a mark's id (m3): the user's mark or yours" })),
   note: Type.Optional(Type.String({ description: "a note's id (n2)" })),
-}, { description: "What the mark is on: give as few fields as name it exactly, e.g. {card, text}." });
-const named = (t: any) => Object.entries(t ?? {}).filter(([, v]) => v).map(([k, v]) => `${k} "${v}"`).join(", ");
+  at: Type.Optional(Type.Object({ x: Type.Number(), y: Type.Number(), width: Type.Number(), height: Type.Number() }, {
+    description: "last resort, for something with no name: a box in window px, as screen_see's picture shows it" })),
+}, { description: "What the mark is on: give as few fields as name it exactly, e.g. {card, text}. The page's own controls "
+  + "have names too: {element: \"pen\"} (also text, eraser, show-marks, note, frames, files, dictate, tools, rail, messages, "
+  + "versions, message-line, boards, new-board)." });
+const named = (t: any) => Object.entries(t ?? {}).filter(([, v]) => v)
+  .map(([k, v]) => k === "at" ? `at x=${v.x} y=${v.y} w=${v.width} h=${v.height}` : `${k} "${v}"`).join(", ");
 
 export default function (pi: ExtensionAPI) {
   const me = () => pi.getSessionName()!;
@@ -174,8 +179,9 @@ export default function (pi: ExtensionAPI) {
       if (a.words && a.words.length > 40) return result(`error: words are at most 40 characters (yours: ${a.words.length}). Put the longer text in a note (note_add).`);
       if (a.gesture === "arrow" && !a.to) return result("error: an arrow needs to (the thing it points at)");
       if (a.gesture === "none" && !a.words) return result("error: gesture none needs words");
-      if (!named(a.on)) return result("error: on names nothing: give card, block, element, text, mark or note");
-      if (a.group && !D.groups[a.group]) return result(`error: no group '${a.group}'. Leave group out: your marks then join the group of the message you are answering, or a new group of your own.`);
+      if (!named(a.on)) return result("error: on names nothing: give card, block, element, text, mark, note or at");
+      const unknown = a.group && !D.groups[a.group] ? a.group : null;  // a made-up group: use the usual one instead
+      if (unknown) a.group = undefined;
       const where = await check(a.on);
       if (where?.error) return result(`error: ${where.error} (on: ${named(a.on)}). Name it as it is on the page: a card id, a block id, an element's id or data-name, or its exact text.`);
       const to = a.to ? await check(a.to) : null;
@@ -187,10 +193,12 @@ export default function (pi: ExtensionAPI) {
       }
       const id = `m${++D.lastMark}`;
       D.marks[id] = { group, by: agent, kind: "gesture", board: where?.board ?? D.groups[group].board, gesture: a.gesture, on: a.on,
-                      ...(a.to && { to: a.to }), ...(a.words && { words: a.words }), ...(where?.box && { box: where.box }), ...(to?.box && { toBox: to.box }) };
+                      ...(a.to && { to: a.to }), ...(a.words && { words: a.words }), ...(where?.box && { box: where.box }), ...(to?.box && { toBox: to.box }),
+                      ...(where?.fixed && { fixed: true }), ...(to?.fixed && { toFixed: true }) };  // fixed: on the page's own controls (window px)
       save();
       host.broadcast("doodle_mark", { id, ...D.marks[id] });
-      return result(`drew ${id} (${a.gesture}${a.words ? ` "${a.words}"` : ""} on ${named(a.on)}) in group ${group}; the user sees it: don't repeat it in your reply`
+      return result(`drew ${id} (${a.gesture}${a.words ? ` "${a.words}"` : ""} on ${named(a.on)}) in group ${group}`
+        + (unknown ? ` (there is no group '${unknown}': leave group out next time)` : "") + "; the user sees it: don't repeat it in your reply"
         + (where ? "" : " (no page open to check the target: it shows when one opens)"));
     },
   });
