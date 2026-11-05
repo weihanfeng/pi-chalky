@@ -15,8 +15,9 @@
 // Tool viewer_read(path, offset?): the same content as text, for the agent (pdf text with unpdf). The Python tool was
 // read_file; renamed so it isn't mistaken for pi's read (text and pictures, which the guide now names for pictures).
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
-import * as XLSX from "xlsx";
+import type { WorkSheet } from "xlsx";  // types only: erased when this runs
 import mammoth from "mammoth";
 import PptxParser from "node-pptx-parser";
 import WordExtractor from "word-extractor";
@@ -25,6 +26,9 @@ import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const host = (globalThis as any).chalky;
+// xlsx is a bundled dependency: npm keeps it inside our package's node_modules and never moves it up next to the
+// others, so a plain import from this home copy doesn't find it. Look for it from the package's own folder instead.
+const XLSX: typeof import("xlsx") = createRequire(path.join(host.root, "package.json"))("xlsx");
 const DIR = path.join(host.workspace, "drops");  // the file extension's folder
 const IMAGES: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
   ".webp": "image/webp", ".bmp": "image/bmp", ".svg": "image/svg+xml", ".avif": "image/avif", ".ico": "image/x-icon" };
@@ -41,7 +45,7 @@ function inside(p: string | null) {  // the real path, if it is a file in DIR; e
   } catch { return null; }
 }
 
-function sheet(name: string, ws: XLSX.WorkSheet) {  // {name, rows, cut}: from A1, at most MAX_ROWS x MAX_COLS
+function sheet(name: string, ws: WorkSheet) {  // {name, rows, cut}: from A1, at most MAX_ROWS x MAX_COLS
   if (!ws["!ref"]) return { name, rows: [], cut: false };
   const r = XLSX.utils.decode_range(ws["!ref"]);
   const cut = r.e.r >= MAX_ROWS || r.e.c >= MAX_COLS;

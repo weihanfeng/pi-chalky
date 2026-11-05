@@ -14,7 +14,9 @@
     "!agent/auth.json",
     "!agent/models-store.json",
     "!agent/models.json",
-    "!agent/mcp-auth.json"
+    "!agent/mcp-auth.json",
+    "!agent/mcp.json",
+    "!agent/ui/"
   ],
   "publishConfig": {
     "access": "public"
