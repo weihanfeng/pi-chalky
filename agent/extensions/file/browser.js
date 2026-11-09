@@ -3,6 +3,8 @@
 //   Files dragged from the computer onto the page: uploaded (POST /file/upload), then a "file-dropped"
 //   DOM event {x, y, files: [{name, path, size}]} at the drop spot (the note extension opens its note box
 //   there). Dropped onto the panel itself: only stored.
+//   Pasted (Ctrl+V / ⌘V) with files on the clipboard: the same as a drop where the pointer last was (copied
+//   images, all named image.png, become pasted-<date>-<time>.png). Text pastes as usual.
 //   A row dragged out of the panel onto the page: the same event, with that file.
 //   A click on a row, or files dropped from the computer (the first of them): a "file-open" DOM event
 //   {file, row} (the viewer extension opens a preview window attached to the row; rows carry data-path).
@@ -42,7 +44,11 @@ export default async function (page) {
     #side .file-bar button { font: inherit; color: var(--text); background: var(--glass-strong); border: 1px solid var(--line);
                               border-radius: 8px; padding: 3px 10px; cursor: pointer; }
     #side .file-bar .delete { color: #fff; background: var(--danger); border-color: transparent; }
-    #side .file-row:hover, #side .file-row.viewing { background: var(--hover); color: var(--text); }`;
+    #side .file-row:hover, #side .file-row.viewing { background: var(--hover); color: var(--text); }
+    .file-uploading { position: fixed; z-index: 200000; max-width: 240px; padding: 5px 10px; border-radius: 10px; font-size: 12px;
+                      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+                      background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+                      border: 1px solid var(--edge); box-shadow: var(--shadow); }`;
   document.head.append(style);
 
   const toggle = document.createElement("button");
@@ -129,15 +135,48 @@ export default async function (page) {
     side.removeAttribute("data-over");
     const { clientX: x, clientY: y } = e;
     if (k === "row") return onPanel(e) || dropped(x, y, [JSON.parse(e.dataTransfer.getData(ROW))]);
-    const stored = [];
-    for (const f of [...e.dataTransfer.files].slice(0, 10)) {
+    store([...e.dataTransfer.files], x, y, onPanel(e));
+  });
+
+  // Upload files (at most MAX), then preview the first and fire "file-dropped" at (x, y), unless they landed on the panel
+  const MAX = 10;
+  async function store(all, x, y, panel, names = all.map((f) => f.name)) {
+    if (all.length > MAX) page.notice([`You added ${all.length} files: only the first ${MAX} were kept.`]);
+    const stored = [], files = all.slice(0, MAX), size = files.reduce((n, f) => n + f.size, 0);
+    const tag = Object.assign(document.createElement("div"), { className: "file-uploading",
+      textContent: `Uploading ${files.length > 1 ? `${files.length} files` : names[0]} · ${Math.ceil(size / 1024)} KB` });
+    Object.assign(tag.style, { left: `${Math.min(x + 14, innerWidth - 260)}px`, top: `${Math.min(y + 16, innerHeight - 40)}px` });
+    const slow = setTimeout(() => document.body.append(tag), 500);  // only when it takes a while
+    for (const [i, f] of files.entries()) {
       try {
-        const out = await (await fetch(`/file/upload?name=${encodeURIComponent(f.name)}`, { method: "POST", body: f })).json();
+        const out = await (await fetch(`/file/upload?name=${encodeURIComponent(names[i])}`, { method: "POST", body: f })).json();
         if (out.path) stored.push({ name: out.path.split("/").pop(), path: out.path, size: out.size });
-        else page.note(`Could not upload ${f.name}: ${out.error}`);
-      } catch (err) { page.note(`Could not upload ${f.name}: ${err}`); }
+        else page.notice([`Could not upload ${names[i]}: ${out.error}`]);
+      } catch (err) { page.notice([`Could not upload ${names[i]}: ${err}`]); }
     }
+    clearTimeout(slow); tag.remove();
     if (stored.length) opened(stored[0]);  // the list has its row by now (the "file" event comes before the reply)
-    if (stored.length && !onPanel(e)) dropped(x, y, stored);
+    if (stored.length && !panel) dropped(x, y, stored);
+  }
+
+  // Paste (Ctrl+V / ⌘V): files on the clipboard are added as if dropped where the pointer last was.
+  // Text pastes as usual. A paste inside a card's app goes to that app (its own page): Chalky never hears it.
+  let pointer = { x: innerWidth / 2, y: innerHeight / 2 };
+  document.addEventListener("pointermove", (e) => { pointer = { x: e.clientX, y: e.clientY }; }, { passive: true });
+  document.addEventListener("paste", (e) => {
+    const files = [...(e.clipboardData?.files || [])];
+    if (!files.length) {  // a Linux file manager copies the file's address, not the file
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      const typing = e.target.closest?.("input, textarea, [contenteditable]");
+      if (!typing && /^file:\/\//.test(text.trim())) page.notice(["You copied a file's address, not the file. Drag the file onto the page instead."]);
+      return;
+    }
+    e.preventDefault();
+    const d = new Date(), p = (n) => String(n).padStart(2, "0");
+    const stamp = `pasted-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+    let n = 0;  // every copied image arrives as image.png
+    const names = files.map((f) => (!f.name || f.name === "image.png") ? `${stamp}${n++ ? `-${n}` : ""}.${f.type.split("/")[1] || "png"}` : f.name);
+    const { x, y } = pointer;
+    store(files, x, y, side.contains(document.elementFromPoint(x, y)), names);
   });
 }
