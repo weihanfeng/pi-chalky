@@ -6,18 +6,10 @@
 //   frame()            the screen right now, as a canvas (null when not shared)
 //   picture(full, box) crop a frame to box (window px {x, y, w, h}), upload it (POST /screen/shot): {path, url}
 // An agent can ask to see the screen (its tool screen_see, event screen_ask): if the tab is shared, a picture
-// of the whole window goes back at once; else a card asks "Share / No" first, since the agent's ask is no click
+// of the whole window goes back at once; else a notice asks "Share" (✕: no) first, since the agent's ask is no click
 // (screen_reply {id, shot, window, main}).
 export default async function (page) {
   const area = page.slot("top");
-  const style = document.createElement("style");
-  style.textContent = `
-    .screen-ask { position: fixed; top: 76px; left: 50%; transform: translateX(-50%); z-index: 100; display: flex; align-items: center; gap: 10px;
-                  padding: 8px 8px 8px 14px; border-radius: 14px; background: var(--glass-strong, #fff); border: 1px solid var(--edge, #eee);
-                  box-shadow: 0 8px 30px rgba(0, 0, 0, .12); font-size: 13px; color: var(--text); }
-    .screen-ask button { border: 0; border-radius: 9px; padding: 5px 12px; font: inherit; cursor: pointer; background: var(--line, #eee); color: var(--text); }
-    .screen-ask button.yes { background: var(--accent, #0071e3); color: #fff; }`;
-  document.head.append(style);
 
   let stream = null, video = null;
   async function share() {
@@ -53,8 +45,8 @@ export default async function (page) {
   // ---- an agent asks to see the screen ----
   const asks = {};  // id -> its card, while the agent waits
   async function answer(id) {
-    for (const card of Object.values(asks)) card.remove();  // not in the picture
-    await new Promise((ok) => setTimeout(ok, 300));         // a fresh frame from the shared tab
+    for (const card of Object.values(asks)) card.close();   // not in the picture
+    await new Promise((ok) => setTimeout(ok, 400));         // it has slid away; a fresh frame from the shared tab
     const full = frame();
     const s = full && await picture(full, { x: 0, y: 0, w: innerWidth, h: innerHeight }).catch(() => null);
     const m = area.getBoundingClientRect();  // window (0, 0) in main-space px (as note/browser.js)
@@ -63,14 +55,9 @@ export default async function (page) {
   }
   page.on("screen_ask", ({ id, agent }) => {
     if (shared()) return answer(id);
-    const card = Object.assign(document.createElement("div"), { className: "screen-ask" });
-    const yes = Object.assign(document.createElement("button"), { className: "yes", textContent: "Share" });
-    const no = Object.assign(document.createElement("button"), { textContent: "No" });
-    card.append(`${agent} wants to see your screen`, yes, no);
+    const yes = Object.assign(document.createElement("button"), { className: "go", textContent: "Share" });
     yes.onclick = async () => { await share(); answer(id); };
-    no.onclick = () => page.send({ type: "screen_reply", id, shot: null });
-    asks[id] = card;
-    document.body.append(card);
+    asks[id] = page.notice([`${agent} wants to see your screen`, yes], () => page.send({ type: "screen_reply", id, shot: null }));  // ✕: no
   });
-  page.on("screen_ask_done", ({ id }) => { asks[id]?.remove(); delete asks[id]; });  // answered (here or in another tab), or timed out
+  page.on("screen_ask_done", ({ id }) => { asks[id]?.close(); delete asks[id]; });  // answered (here or in another tab), or timed out
 }

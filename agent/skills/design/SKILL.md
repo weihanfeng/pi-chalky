@@ -120,4 +120,4 @@ in it share a palette, a way of shading and a level of detail.
 
 ## 11. Check it
 Load browser-check and look at a screenshot: overlaps, clipped text, labels colliding, things outside their box.
-Fix what you see once, then stop polishing; the user will point at what they want changed.
+Fix everything you see before you show it: the user marks up details, not missing basics.

@@ -1,5 +1,12 @@
 # Making an app (the app extension)
-Everything a usual app needs is here: for one, you don't need the card README or the design and browser-check skills.
+Everything a usual app needs is here (you don't need the card README). The design skill goes deeper on charts,
+diagrams, game art and one look across cards: load it when the app has any of those.
+
+## Before you write
+The first version is already complete and polished: the user marks up details, not missing basics. So first list,
+in a short message, the 3-5 things that would make this app impressive for this subject: what someone who knows the
+subject would expect to find, and a picture (diagram, chart, animation) wherever one explains faster than text.
+Then build all of them in the first version, not a smaller first cut.
 
 ## Write it, show it
 - Write {built}/apps/<name>/index.html (other files next to it), then card_show(card=<id>, app=<name>, about="...").
@@ -45,20 +52,17 @@ The page is light, glassy and quiet; match it unless the user asks for another l
 - Show just the thing: no frame or panel around it unless it needs one. Group with flex/grid and gap.
 - Open in a working state (its real data, or a marked example), never an empty shell; `tabular-nums` for digits.
 - Buttons say what happens ("Add habit"); short plain words; status colours always with a word or icon.
+- Ground it in the subject: its real units, terms and conventions (a chess clock shows mm:ss; a kanban card has an
+  owner and a state). Real content, never lorem ipsum.
+- Summary before detail; show state in form (a pill, a chip, a stripe) as well as numbers.
+- Finish every state: empty, loading, error, done. Interactive things look interactive (hover, pressed, visible
+  keyboard focus); a small transition where something changes, never content hidden waiting for an animation.
 - Avoid the generic AI look: cream and terracotta, purple gradients, emoji as markers, the same shadowed card on
   everything. For a chart, a diagram, a game's art or a restyle, load the design skill.
 
 ## Check it works
-card_show covers errors and fit. Before telling the user what it does, try its main action and a reload with
-{agent}/skills/browser-check/scripts/check.mjs:
-```
-node <that check.mjs> {page}/built/apps/<name>/index.html "eval:(()=>{const i=document.querySelector('#new'); i.value='Test-1';
-  i.dispatchEvent(new Event('input',{bubbles:true})); i.form.requestSubmit(); return 'ok'})()" wait:800 \
-  "eval:document.body.innerText.includes('Test-1')"
-```
-Set values with eval (`type:` adds to what a field already holds). Run it again to see what a reload keeps.
-Your test writes the user's real data: note it first (cat {data}/app/<name>.json) and put it back afterwards
-(PUT, above). Say only what you saw working.
+card_show covers errors and fit. Then, before telling the user what it does, use it on their page as they would:
+load the test-your-app skill. Say only what you saw working.
 
 ## More
 - Calculations (totals, streaks, dates) belong in the page's code, never worked out by you and typed in.
