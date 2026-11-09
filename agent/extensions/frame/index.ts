@@ -3,8 +3,8 @@
 // so it sees the whole layout and decides how to split the work (alone, or with helpers: README.md, not code).
 // A frame is {x, y, width, height, text, sent, to?, board} (main-space px, where card_show's place puts a card;
 // board: the one it was drawn on, board/; Implement sends the frames of the board shown), with an
-// id (frame-1, frame-2, ...: never reused). An agent fills it with card_show(card="frame-1", place=<its place>);
-// when that card appears (a card watcher, host.api.card.watch), the frame is done and its dashed box goes. The user
+// id (frame-1, frame-2, ...: never reused). An agent fills it with card_show(place=<its place>) (any card id);
+// when a card appears at its place (or with its id) (a card watcher, host.api.card.watch), the frame is done and its dashed box goes. The user
 // can remove a frame (its ✕); if it was sent, its agent is told. Until a frame is sent, its corner resizes it.
 //   GET /frame              {id: frame}
 //   page messages           frame_add {x, y, width, height, board}, frame_place {id, x, y, width, height}, frame_text {id, text},
@@ -32,10 +32,17 @@ const place = (f: any) => JSON.stringify({ x: f.x, y: f.y, width: f.width, heigh
 
 export default function (pi: ExtensionAPI) {
 
-  // a frame is done when a card with its id appears (after all extensions loaded: the card one may come later)
+  // a frame is done when a card appears at its place on its board, or with its id (after all extensions loaded: the
+  // card one may come later). The place is what the user chose; agents often give the card a name of its own.
   pi.on("session_start", () => {
     host.api.card?.watch("frame", (sid: string) => {
-      if (frames[sid] && host.shared.get("card")?.cards[sid]) { delete frames[sid]; changed(); }
+      const card = host.shared.get("card")?.cards[sid];
+      if (!card) return;
+      const at = (f: any) => card.place && (card.board ?? 1) === (f.board ?? 1)
+        && ["x", "y", "width", "height"].every((k) => Math.round(card.place[k]) === f[k]);
+      const done = Object.keys(frames).filter((id) => id === sid || at(frames[id]));
+      for (const id of done) delete frames[id];
+      if (done.length) changed();
     });
     host.api.board?.onRemove("frame", (n: number) => {  // a removed board (board/) takes its frames with it
       const ids = Object.keys(frames).filter((id) => (frames[id].board ?? 1) === n);
@@ -72,7 +79,7 @@ export default function (pi: ExtensionAPI) {
       changed();
       const lines = [`[frames on the page] the user laid out ${ready.length} frame${ready.length > 1 ? "s" : ""} on board ${board} to fill:`,
         ...ready.map(([id, f]: any) => `  ${id}: "${f.text}" · place=${place(f)}`),
-        `  Fill each with card_show(card=<its id>, place=<its place>, board=${board}, ...); its dashed box goes when it appears.`];
+        `  Fill each with card_show(place=<its place>, board=${board}, ...) (any card id): its dashed box goes when a card appears there.`];
       const waiting = Object.keys(frames).filter((id) => frames[id].sent && !ready.some(([r]) => r === id));
       if (waiting.length) lines.push(`  Sent before and not filled yet: ${waiting.join(", ")}.`);
       team.send("user", to, lines.join("\n"));

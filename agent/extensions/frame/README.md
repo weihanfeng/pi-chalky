@@ -24,8 +24,8 @@ one design, not separate requests: they share one look, and often each other's d
   on the page, with no agent in between. Separate block cards with {"ref"} props are for a frame that only
   shows another's data (refs only read). Don't change the page's own code (page.html, the browser.js files) to
   link frames.
-- Fill a frame with card_show(card=<its id>, place=<its place>, ...): its dashed box goes when that
-  card appears. Keep the place: the user chose where and how big.
+- Fill a frame with card_show(place=<its place>, ...), with any card id (a name for what it is): its
+  dashed box goes when a card appears exactly there. Keep the place: the user chose where and how big.
 - Split the work when it pays: several frames that are each real work and don't depend on each other can
   go to helpers in parallel (team_spawn, or idle agents you have): tell each one its frame, and what done
   means: "card <id> shown at <place>, doing <their words>". Say the shared look in each message
