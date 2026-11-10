@@ -270,6 +270,8 @@ function file(res: http.ServerResponse, p: string) {
 //   stage()  git add -A for what inHistory keeps (.gitignore files play no part); returns the changed paths
 //   restore(oid)  that version's agent/ and built/ into the folders and the index, removing files it doesn't have
 //            (the branch stays where it is; what the history doesn't keep, logins and endpoints, isn't touched)
+//   versions()  the user's versions, newest first, as git.log gives them ({oid, commit}): main's own line, without
+//            the releases an update merged in (see "updates" below)
 const REPO = { fs, dir: HOME, gitdir: path.join(DATA, "version", "git") };
 const KEPT = { filepaths: ["agent", "built"], ignored: true, filter: inHistory };  // statusMatrix's walk: only these
 // isomorphic-git 1.44.2 takes a file whose size and mtime (whole seconds) match the index as unchanged: a same-size
@@ -321,6 +323,24 @@ const CHALKY = { name: "chalky", email: "chalky@chalky" };
 const OWN = ["agent/mcp.json"];
 const ref = (r: string) => git.resolveRef({ ...REPO, ref: r }).catch(() => undefined);
 const blob = async (oid: string) => Buffer.from((await git.readBlob({ ...REPO, oid })).blob);
+
+// The user's versions: from HEAD by first parents only (an update's first parent is the version before it; its
+// second, the release), stopping at a release (a new home's first version comes after one). Not git.log: it walks
+// both parents, so the releases would be listed as versions (going back to one would take the agents' changes and
+// built/ away), the first release twice, and versions made in the same second out of order.
+async function versions() {
+  const releases = new Set<string>(), original = await ref("refs/tags/original");  // a home from before: its "original" isn't one
+  for (let oid = await ref("package"); oid && oid !== original; oid = (await git.readCommit({ ...REPO, oid })).commit.parent[0])
+    releases.add(oid);
+  const out = [];
+  for (let oid = await ref("HEAD"); oid && !releases.has(oid); ) {
+    const c = await git.readCommit({ ...REPO, oid });
+    out.push(c);
+    oid = c.commit.parent[0];
+  }
+  return out;
+}
+Object.assign(host.history, { versions });
 
 async function releaseTree(dir: string): Promise<string | null> {  // the package's agent/ (what startAgent copies) as a git tree
   const tree = [];
@@ -429,7 +449,7 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 
 async function recoverPage(res: http.ServerResponse) {
   // the history's folder comes before its first commit: right after a start there may be no versions yet
-  const log = fs.existsSync(REPO.gitdir) ? await git.log(REPO).catch((e) => e.code === "NotFoundError" ? [] : Promise.reject(e)) : [];
+  const log = await versions();  // (none yet: [])
   const rows = log.map(({ oid, commit: c }, i) => `<tr><td>${new Date(c.author.timestamp * 1000).toLocaleString()}</td>
     <td>${esc(c.author.name)}</td><td>${esc(c.message.split("\n")[0])}</td>
     <td>${fs.existsSync(path.join(DATA, "version", "shots", `${oid}.png`)) ? "the page worked" : ""}</td>

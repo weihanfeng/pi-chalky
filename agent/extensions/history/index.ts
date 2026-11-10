@@ -88,7 +88,9 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", () => {
     if (!host.shared.has("history")) host.shared.set("history", new History(host.shared.get("card")));
     host.api.history = host.shared.get("history");
-    host.api.card?.watch("history", (_id: string, by?: string, what?: string) => { if (what) host.api.history.add(by, what); });
+    host.api.card?.watch("history", (_id: string, by?: string, what?: string) => {  // the card's words don't say who
+      if (what) host.api.history.add(by, `${by === "user" ? "you" : by} ${what}`);
+    });
   });
   const shared = (): History | undefined => host.shared.get("history");
 

@@ -5,10 +5,10 @@
 // skill's headless browser and says what it found: errors, and whether the app fits its card. The cards are shared by every agent: one Cards object on
 // the host, made by whichever agent loads first.
 // One door: every change goes through change(): it saves, tells every open page, and calls every watcher with the
-// card, who did it and the words for it ("you moved s1"; none: part of a bigger change). restore() puts back a
-// saved state (not a change: no watchers). Watchers, registered from session_start:
+// card, who did it ("user" or the agent) and the words for it, without who ("moved s1"; none: part of a bigger
+// change). restore() puts back a saved state (not a change: no watchers). Watchers, registered from session_start:
 //   host.api.card.watch(name, fn(card, by, what))   name: the extension's, so its reload replaces its own
-// (history: a step per change with words; frame: a frame is done when its card appears).
+// (history: a step per change with words; frame: a frame is done when its card appears; version: a version's label).
 //   built/card.json  each card but its data (versioned)      data/card.json  each card's data (what users typed)
 // A card: {owner, blocks | app, data, place, board, about, pinned, options, made_from, instruction, draggable,
 //   resizable, height (an app's, when nothing else sizes it), kinds (each block's about.version, for upgrades)}.
@@ -200,7 +200,7 @@ export default function (pi: ExtensionAPI) {
     const gone = ids.map((id) => ({ owner: cards.cards[id].owner, what: `card ${id}` }));
     ids.forEach((id, i) => {
       cards.copyIntoUsers(id);  // cards elsewhere reading from it keep its values
-      cards.change(id, null, "user", i === ids.length - 1 ? `you removed board ${n} (${ids.join(", ")})` : undefined);
+      cards.change(id, null, "user", i === ids.length - 1 ? `removed board ${n} (${ids.join(", ")})` : undefined);
     });
     return gone;
   }));
@@ -268,7 +268,7 @@ export default function (pi: ExtensionAPI) {
                             ["instruction", a.instruction ?? old.instruction], ["options", options.length ? options : null]] as const) if (v) record[k] = v;
       // its board (board/): the one asked for, a new one, where it already is, or the one the user is on
       if (boards) record.board = a.board === "new" ? boards.add() : a.board ?? old.board ?? boards.current();
-      cards.change(a.card, record, agent, `${agent} showed ${a.card}` + (options.length ? ` (${options.length} options)` : ""));
+      cards.change(a.card, record, agent, `showed ${a.card}` + (options.length ? ` (${options.length} options)` : ""));
       const where = boards ? `on board ${record.board}${a.board === "new" ? " (a new board)" : ""}` : "on screen";
       if (options.length) return result(`card '${a.card}' shows ${options.length} options ${where}; the user flips through them and keeps one`);
       if (!main.app) return result(`card '${a.card}' is ${where}`);
@@ -296,11 +296,11 @@ export default function (pi: ExtensionAPI) {
         b[a.path] = a.value;
         const errors = problems(r.blocks, r.made_from);
         if (errors.length) return result("error: " + errors.join("; "));
-        cards.change(a.card, r, agent, `${agent} set ${a.path} of ${a.block} in ${a.card}`);
+        cards.change(a.card, r, agent, `set ${a.path} of ${a.block} in ${a.card}`);
         return result("updated");
       }
       setPath(r.data, a.path, a.value);
-      cards.change(a.card, r, agent, `${agent} changed ${a.path} in ${a.card}`);
+      cards.change(a.card, r, agent, `changed ${a.path} in ${a.card}`);
       return result("updated");
     },
   });
@@ -313,7 +313,7 @@ export default function (pi: ExtensionAPI) {
       const locked = cards.locked(a.card);
       if (locked) return result(locked);
       const users = cards.copyIntoUsers(a.card), agent = pi.getSessionName() ?? "agent";
-      cards.change(a.card, null, agent, `${agent} removed ${a.card}` + (users.length ? ` (${users.join(", ")} got a copy)` : ""));
+      cards.change(a.card, null, agent, `removed ${a.card}` + (users.length ? ` (${users.join(", ")} got a copy)` : ""));
       return result("removed" + (users.length ? `; ${users.join(", ")} read from it, so they got a copy of its data` : ""));
     },
   });
@@ -339,30 +339,30 @@ export default function (pi: ExtensionAPI) {
     if (!r || !type?.startsWith("card_")) return;
     if (type === "card_close") {
       const users = cards.copyIntoUsers(id);
-      cards.change(id, null, "user", `you closed ${id}` + (users.length ? ` (${users.join(", ")} got a copy)` : ""));
+      cards.change(id, null, "user", `closed ${id}` + (users.length ? ` (${users.join(", ")} got a copy)` : ""));
     }
     else if (type === "card_move") {
       if (r.pinned) return host.broadcast("card", { op: "render", card: id, ...r });
-      r.place = msg.place; cards.change(id, r, "user", `you moved ${id}`);
+      r.place = msg.place; cards.change(id, r, "user", `moved ${id}`);
     } else if (type === "card_board" && host.api.board?.has(msg.board)) {  // dropped on another board's thumbnail
       if (r.pinned) return host.broadcast("card", { op: "render", card: id, ...r });
-      r.board = msg.board; r.place = msg.place ?? null; cards.change(id, r, "user", `you moved ${id} to board ${msg.board}`);
-    } else if (type === "card_set") { setPath(r.data, msg.path ?? "/", msg.value); cards.change(id, r, "user", `you changed ${msg.path} in ${id}`); }
+      r.board = msg.board; r.place = msg.place ?? null; cards.change(id, r, "user", `moved ${id} to board ${msg.board}`);
+    } else if (type === "card_set") { setPath(r.data, msg.path ?? "/", msg.value); cards.change(id, r, "user", `changed ${msg.path} in ${id}`); }
     else if (type === "card_prop") {
       for (const b of r.blocks ?? []) if (b.id === msg.block && !STRUCTURE.includes(msg.prop)) b[msg.prop] = msg.value;
-      cards.change(id, r, "user", `you set ${msg.prop} of ${msg.block} in ${id}`);
-    } else if (type === "card_pin") { r.pinned = !!msg.pinned; cards.change(id, r, "user", `you ${r.pinned ? "pinned" : "unpinned"} ${id}`); }
+      cards.change(id, r, "user", `set ${msg.prop} of ${msg.block} in ${id}`);
+    } else if (type === "card_pin") { r.pinned = !!msg.pinned; cards.change(id, r, "user", `${r.pinned ? "pinned" : "unpinned"} ${id}`); }
     else if (type === "card_keep" && r.options) {
       const o = r.options[Number(msg.index ?? 0)];
       delete r.options;
       if (o) {
         delete r.blocks; delete r.app;
         Object.assign(r, o.app ? { app: o.app } : { blocks: o.blocks }, { data: o.data });
-        cards.change(id, r, "user", `you kept ${o.label} of ${id}`);
+        cards.change(id, r, "user", `kept ${o.label} of ${id}`);
       }
     } else if (type === "card_action") {
       r.data = msg.data ?? r.data;
-      cards.change(id, r, "user", `you used ${msg.name} in ${id}`);
+      cards.change(id, r, "user", `used ${msg.name} in ${id}`);
       host.send("user", r.owner, `[card action] ${msg.name} on card '${id}' (${msg.block === "app" ? "its app" : `block ${msg.block}`})\n`
         + `context: ${JSON.stringify(msg.context ?? {})}\ndata: ${JSON.stringify(r.data)}`);
     }

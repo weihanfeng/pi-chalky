@@ -153,6 +153,11 @@ const message = (h) => {  // agent1's session: the update's message from chalky,
 };
 const gitdirStray = (h) => fs.readdirSync(`${h}/data/version/git`).filter((f) => !["HEAD", "config", "description", "index", "objects", "refs", "hooks", "info", "logs", "packed-refs", "ORIG_HEAD", "MERGE_HEAD"].includes(f));
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+async function listed() {  // what the running server lists: the version panel's GET /version, and /recover's rows
+  const panel = (await (await fetch(`http://127.0.0.1:${PORT}/version`)).json()).map((v) => v.message);
+  const recover = [...(await (await fetch(`http://127.0.0.1:${PORT}/recover`)).text()).matchAll(/<tr><td>[^<]*<\/td>\s*<td>[^<]*<\/td><td>([^<]*)<\/td>/g)].map((m) => m[1]);
+  return { panel, recover };
+}
 
 // =====================================================================================================================
 console.log("1. a new home");
@@ -268,7 +273,12 @@ console.log("4. home edits already saved by an agent: no 'Before update' version
 console.log("5. the next release while .new files are still waiting (the base is now 9.0.1)");
 {
   const h = H3;
-  const s = await start(R3, h);
+  const s = await start(R3, h, { keep: true });
+  const shown = await listed();
+  await s.stop();
+  const mine = ["Updated to Chalky 9.0.2", "Updated to Chalky 9.0.1", "Before update to Chalky 9.0.1", "made a card", "Started with Chalky 9.0.0"];
+  eq(shown.panel, mine, "the version panel lists the user's versions only: no releases, none twice, in order");
+  eq(shown.recover, mine, "/recover lists the same");
   const a = `${h}/agent`, card = read(`${a}/extensions/card/browser.js`).split("\n");
   eq(s.update?.conflicts, [], "no new conflicts: 9.0.2 changed other lines than the home");
   eq([card[0], card[2]], ["// card: square corners (the user's)", "// card line 3: 9.0.2"], "card: the home's line 1 and 9.0.2's line 3");
@@ -378,8 +388,12 @@ console.log("11. a home made by the code before updates (an 'original' version, 
   eq(await log(h, "main"), ["original"], "the old home: one version, 'original'");
   check(read(`${h}/agent/mcp.json`) !== null, "the old home has the mcp.json it was given");
   setLine(`${h}/agent/extensions/card/browser.js`, 1, "// card: square corners (the user's)");
-  const s = await start(R2, h);
+  const s = await start(R2, h, { keep: true });
+  const shown = await listed();
+  await s.stop();
   eq(s.update?.conflicts.length, 1, "one conflict (the card), so the base was 'original'");
+  eq(shown.panel, ["Updated to Chalky 9.0.1", "Before update to Chalky 9.0.1", "original"], "the version panel: the user's versions, 'original' included");
+  eq(shown.recover, shown.panel, "/recover lists the same");
   eq(differ(`${h}/agent`, `${R2}/agent`), ["extensions/card/browser.js"], "agent/ is 9.0.1 but for the home's edit (the old code's version extension: replaced)");
   eq(read(`${h}/agent/mcp.json`), '{"mcpServers":{}}', "mcp.json: not removed, though the release has none");
   eq(await log(h, "package"), ["Chalky 9.0.1", "original"], "package: starts from 'original'");
