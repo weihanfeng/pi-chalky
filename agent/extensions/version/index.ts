@@ -1,7 +1,8 @@
 // Version history of agent/ and built/ together: what the agents are and what they made, so one rollback puts both
 // back. The repo and the rule for what it keeps (not logins, endpoints or installed packages) are the host's
 // (host.history, server.ts: /recover uses them too); this extension commits, lists and rolls back, one operation at
-// a time. Its first commit is both folders as they were the first time, tagged "original".
+// a time. Its first commit is both folders as they were the first time, tagged "original" (in an installed home,
+// server.ts makes the first one: "Started with Chalky <version>"; it also merges each new release, as a version).
 //   - When an agent's turn is over (pi's agent_settled) and either folder changed: commit, author = that agent, message =
 //     its reload reason, else what it was asked (Python: what it first said, often just "done"), else what it said.
 //     Event "version" to the pages ({agent, sha, message, files, restart: false}: they refresh what changed).
@@ -9,6 +10,8 @@
 //     headless browser), after each new version and, when a page opens, for the current version if it has none.
 //     In data/version/shots/<sha>.png. A version made while no page was open and changed again before one opened: none.
 //   - GET  /version                  commits, newest first ({sha, short, author, date, message, current, shot})
+//     GET  /version/update          this start's update of Chalky (server.ts's host.update), to the first page that
+//                                    asks (browser.js: a notice); later: null. {release, files, conflicts} or {release, error}
 //     GET  /version/<sha>/shot      that commit's picture (404 if none; HEAD too)
 //     PUT  /version/<sha>/shot      the page's picture (PNG, at most 10 MB; {saved: false} if it has one: the first page wins)
 //     POST /version/<sha>/rollback  that commit's files as a NEW commit (history is never rewritten, so a rollback
@@ -23,7 +26,7 @@ import git from "isomorphic-git";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const host = (globalThis as any).chalky;
-const { repo, kept, stage } = host.history;
+const { repo, stage, restore } = host.history;
 const SHOTS = path.join(host.data, "version", "shots");
 const MAX_SHOT = 10 * 1024 * 1024;
 const who = (name: string) => ({ name, email: `${name}@chalky` });
@@ -85,6 +88,11 @@ export default function (pi: ExtensionAPI) {
     });
   });
 
+  host.routes.set("/version/update", (_req: any, res: any) => {
+    const u = host.update && !host.update.told ? host.update : null;
+    if (u) u.told = true;
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(u));
+  });
   host.routes.set("/version", async (_req: any, res: any) => {
     const now = await head();  // waits for queued work, so the log is complete
     const out = (await git.log(repo)).map(({ oid, commit: c }) => ({ sha: oid, short: oid.slice(0, 7), author: c.author.name,
@@ -123,11 +131,10 @@ export default function (pi: ExtensionAPI) {
     if (what !== "rollback" || req.method !== "POST") return res.writeHead(404).end();
     const subject = `${sha.slice(0, 7)} ${(await git.readCommit({ ...repo, oid: sha })).commit.message.split("\n")[0]}`;
     await host.api.team?.stop();
-    const files = await queued(async () => {
+    let files: string[];
+    try { files = await queued(async () => {
       await commit("user", "uncommitted changes before rollback");  // nothing is ever lost
-      // that commit's agent/ and built/ into the folders and the index, removing files it doesn't have; the branch
-      // stays where it is. What the history doesn't keep (logins, endpoints) isn't touched.
-      await git.checkout({ ...repo, ref: sha, noUpdateHead: true, force: true, filepaths: kept.filepaths });
+      await restore(sha);  // that commit's agent/ and built/ (server.ts)
       const files = await stage();
       // git keeps files, not folders: a folder whose files the rollback removed stays, empty (an extension folder
       // without index.ts would show in the map). Remove those, up to the first one that isn't empty.
@@ -136,7 +143,9 @@ export default function (pi: ExtensionAPI) {
       }
       await git.commit({ ...repo, message: `rollback to ${subject}`, author: who("user") });
       return files;
-    });
+    }); } catch (e: any) {  // an answer, not a request left hanging
+      return res.writeHead(500, { "content-type": "application/json" }).end(JSON.stringify({ error: String(e?.message ?? e) }));
+    }
     for (const name of host.agents.keys()) await host.reloadAgent(name);
     if (files.includes("built/card.json")) { host.shared.get("card")?.load(); host.api.history?.add("user", `rolled back to ${subject}`); }
     for (const name of host.agents.keys())

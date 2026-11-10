@@ -3,6 +3,7 @@
 // with dom-to-image-more, then each same-site app frame's own page pasted in place (the library leaves frames
 // blank), crops to the cards plus a margin, and uploads it: PUT /version/<sha>/shot (the first page wins).
 // Can't be drawn: video, and pictures or frames from other sites (those parts stay blank).
+// Also: when Chalky was updated at this start (GET /version/update), a notice says what changed or why it couldn't.
 const MARGIN = 32;
 let lib;
 const library = () => lib ??= new Promise((ok, no) => {  // loaded once, on the first picture
@@ -51,6 +52,14 @@ function shoot(sha) {  // one picture at a time
 export default async function (page) {
   if (new URLSearchParams(location.search).has("shot")) return;  // the old headless view
   page.on("version", (ev) => setTimeout(() => shoot(ev.sha), 2000));  // after the page has redrawn what changed
+  fetch("/version/update").then((r) => r.json()).then((u) => {
+    if (!u) return;
+    const kept = u.conflicts?.length;
+    page.notice(u.error ? [`Chalky couldn't update to ${u.release}, so it runs as before. ${u.error}`]
+      : [`Updated to ${u.release}: ${u.files} file${u.files === 1 ? "" : "s"} changed.`
+        + (kept ? ` ${kept} kept your change; agent1 is merging the update into ${kept === 1 ? "it" : "them"}.` : "")
+        + " To undo it, go back a version in Versions."]);
+  }).catch(() => {});
   try {  // the current version has no picture yet (made while no page was open): take it now
     const current = (await (await fetch("/version")).json()).find((v) => v.current);
     if (current && !current.shot) setTimeout(() => shoot(current.short), 3000);  // once the cards are drawn

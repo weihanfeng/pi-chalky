@@ -5,6 +5,7 @@
 //   - keeps one pi AgentSession per agent (session name = agent name; saved under data/sessions/<agent>);
 //   - keeps the rule for the version history (host.history) and serves /recover, going back to a working version
 //     when an agent broke the page (the safety net);
+//   - brings a new release of this package into the home's agent/, merged with what the agents changed (host.update);
 //   - hands each agent's pi events to the extensions that asked (host.eventHandlers), and tells them when a page
 //     opens (host.connectHandlers). The page extension turns pi's messages into the page's and replays them.
 // Extensions reach the host through globalThis.chalky (pi loads them with jiti, so they don't share our imports).
@@ -17,6 +18,7 @@ import path from "node:path";
 import { createAgentSession, createCodemodeExtension, createMcpExtension, createToolSearchExtension, DefaultResourceLoader, SessionManager,
   SettingsManager } from "@earendil-works/pi-coding-agent";
 import git from "isomorphic-git";
+import diff3Merge from "diff3";
 import { WebSocketServer } from "ws";
 
 const ROOT = import.meta.dirname;                         // this package: server.ts and the starting agent/
@@ -97,9 +99,9 @@ function migrate() {
       .replaceAll("/ui/agents.js", "/app/agents.js").replaceAll("/ui/voice.js", "/voice/voice.js")
       .replaceAll("/ui-api/app-data/", "/app/data/").replaceAll("/ui/apps/", "/built/apps/"));
 }
-migrate();
-if (!fs.existsSync(AGENT)) startAgent();  // first run: the starting agent
+migrate();  // (a new home's agent/ comes from the update below: the first release, merged into nothing)
 if (HOME !== ROOT) {  // HOME/agent's extensions import our dependencies: Node looks for a node_modules above them
+  fs.mkdirSync(HOME, { recursive: true });  // a new home: nothing made it yet
   const link = path.join(HOME, "node_modules");
   if (fs.lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()) fs.unlinkSync(link);  // again each start: the package may have moved
   if (fs.existsSync(link)) throw new Error(`${link} is in the way: Chalky links it to ${MODULES}`);
@@ -266,19 +268,154 @@ function file(res: http.ServerResponse, p: string) {
 // The version extension commits and rolls back with this; /recover too, so it works when that extension is broken.
 //   repo     isomorphic-git's {fs, dir: HOME, gitdir}
 //   stage()  git add -A for what inHistory keeps (.gitignore files play no part); returns the changed paths
+//   restore(oid)  that version's agent/ and built/ into the folders and the index, removing files it doesn't have
+//            (the branch stays where it is; what the history doesn't keep, logins and endpoints, isn't touched)
 const REPO = { fs, dir: HOME, gitdir: path.join(DATA, "version", "git") };
 const KEPT = { filepaths: ["agent", "built"], ignored: true, filter: inHistory };  // statusMatrix's walk: only these
+// isomorphic-git 1.44.2 takes a file whose size and mtime (whole seconds) match the index as unchanged: a same-size
+// change in the second after it was staged would be missed (and an update would write over it). Real git checks
+// those "racy" files; here every file that looks unchanged is checked by its content. Its status also misses a change
+// of the x bit alone: checked too.
 async function stage() {
-  const changed = [];
+  const changed = [], staged = new Map<string, string>();  // the index: path -> "oid mode"
+  await git.walk({ ...REPO, trees: [git.STAGE()], map: async (f, [e]) => {
+    if (e && f !== "." && (await e.type()) === "blob") staged.set(f, `${await e.oid()} ${await e.mode()}`);
+    return true;
+  } });
+  const now = async (f: string) => { const p = path.join(HOME, f);  // the file as git would stage it
+    return `${(await git.hashBlob({ object: fs.readFileSync(p) })).oid} ${fs.statSync(p).mode & 0o111 ? 0o100755 : 0o100644}`; };
   for (const [filepath, head, workdir, index] of await git.statusMatrix({ ...REPO, ...KEPT })) {
-    if (head === 1 && workdir === 1 && index === 1) continue;  // unchanged
+    if (head === 1 && workdir === 1 && index === 1 && await now(filepath) === staged.get(filepath)) continue;  // unchanged
     if (workdir === 0) { if (index !== 0) await git.remove({ ...REPO, filepath }); }
     else await git.add({ ...REPO, filepath, force: true });
     changed.push(filepath);
   }
   return changed;
 }
-Object.assign(host, { history: { repo: REPO, kept: KEPT, stage } });
+// Only the folders that either version has files in: for a folder neither has (built/ before anything was made, still
+// on disk as built/apps/), isomorphic-git 1.44.2's checkout takes it for a file to delete and throws EISDIR.
+async function restore(oid: string) {
+  const has = async (ref: string, dir: string) => (await git.listFiles({ ...REPO, ref })).some((f) => f.startsWith(`${dir}/`));
+  const head = await git.resolveRef({ ...REPO, ref: "HEAD" });
+  const filepaths = [];
+  for (const dir of KEPT.filepaths) if (await has(oid, dir) || await has(head, dir)) filepaths.push(dir);
+  if (filepaths.length) await git.checkout({ ...REPO, ref: oid, noUpdateHead: true, force: true, filepaths });
+}
+Object.assign(host, { history: { repo: REPO, kept: KEPT, stage, restore } });
+
+// ---- updates: each release of this package is a commit on the history's "package" branch, merged into main ----
+// The package's agent/ is a release; the home's agent/ is what runs, and the agents change it. At start, a release
+// not merged yet is committed on "package" (its agent/ only) and merged into main, file by file. The base is the
+// release merged last (git's merge base), so for each file:
+//   only the release changed it -> the release's        only the home changed it -> the home's
+//   both, in different lines -> both changes (diff3)
+//   both, in the same lines, or one side deleted it -> the home's stays; the release's goes next to it as
+//   <file>.new, and agent1 is asked to merge them (host.update.conflicts)
+// First a "Before update" commit of unsaved changes, then one commit with both parents: the version panel undoes an
+// update like any change. A new home is the first release merged into nothing; a home from before this has no
+// "package" yet: its base is its "original" version (the release it started from). If the update fails, the home
+// runs as it was and the page says why (host.update.error). Not when the home is this folder (node server.ts here).
+// agent/mcp.json is the user's own list of MCP servers: the package never ships it, so no release brings or removes it.
+const RELEASE = `Chalky ${JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).version}`;
+const CHALKY = { name: "chalky", email: "chalky@chalky" };
+const OWN = ["agent/mcp.json"];
+const ref = (r: string) => git.resolveRef({ ...REPO, ref: r }).catch(() => undefined);
+const blob = async (oid: string) => Buffer.from((await git.readBlob({ ...REPO, oid })).blob);
+
+async function releaseTree(dir: string): Promise<string | null> {  // the package's agent/ (what startAgent copies) as a git tree
+  const tree = [];
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    const rel = path.relative(path.join(ROOT, "agent"), p);
+    if (!isAgentPart(rel) || OWN.includes(`agent/${rel}`)) continue;
+    if (e.isFile()) tree.push({ mode: fs.statSync(p).mode & 0o111 ? "100755" : "100644", path: e.name, type: "blob" as const,
+      oid: await git.writeBlob({ ...REPO, blob: fs.readFileSync(p) }) });
+    else if (e.isDirectory()) { const oid = await releaseTree(p); if (oid) tree.push({ mode: "040000", path: e.name, type: "tree" as const, oid }); }
+  }
+  return tree.length ? git.writeTree({ ...REPO, tree }) : null;
+}
+
+async function filesOf(commit?: string) {  // agent/'s files in a commit: path -> {oid, mode}
+  const files = new Map<string, { oid: string; mode: number }>();
+  if (commit) await git.walk({ ...REPO, trees: [git.TREE({ ref: commit })], map: async (p, [e]) => {
+    if (p !== "." && p !== "agent" && !p.startsWith("agent/")) return null;  // built/: not the release's
+    if (e && (await e.type()) === "blob") files.set(p, { oid: await e.oid(), mode: await e.mode() });
+    return true;
+  } });
+  return files;
+}
+
+function merge3(base: Buffer, ours: Buffer, theirs: Buffer) {  // both changes, or null if they touch the same lines
+  if ([base, ours, theirs].some((b) => b.includes(0))) return null;  // not text
+  const lines = (b: Buffer) => b.toString("utf8").match(/^.*(\r?\n|$)/gm) ?? [];
+  const parts = diff3Merge(lines(ours), lines(base), lines(theirs));
+  return parts.some((p: any) => p.conflict) ? null : parts.flatMap((p: any) => p.ok).join("");
+}
+
+async function update() {
+  let main = await ref("main"), pkg = await ref("package");
+  const last = pkg && (await git.readCommit({ ...REPO, oid: pkg })).commit.message.trim();
+  if (last === RELEASE && main && (await git.findMergeBase({ ...REPO, oids: [main, pkg!] }))[0] === pkg) return;  // merged
+  await git.init({ ...REPO, defaultBranch: "main" });  // (does nothing if there is one)
+  if ((await stage()).length) main = await git.commit({ ...REPO, message: `Before update to ${RELEASE}`, author: CHALKY });
+  if (last !== RELEASE) {
+    const agent = await releaseTree(path.join(ROOT, "agent"));
+    const tree = await git.writeTree({ ...REPO, tree: agent ? [{ mode: "040000", path: "agent", type: "tree", oid: agent }] : [] });
+    const parent = pkg ?? (main && await ref("refs/tags/original"));  // a home from before this: the release it started from
+    pkg = await git.commit({ ...REPO, ref: "refs/heads/package", tree, parent: parent ? [parent] : [], message: RELEASE, author: CHALKY });
+  }
+  const [base] = main ? await git.findMergeBase({ ...REPO, oids: [main, pkg!] }) : [];
+  const [B, O, T] = await Promise.all([base, main, pkg].map(filesOf));
+  const writes: [string, Buffer | null, number?][] = [], conflicts: string[] = [];  // [path in HOME, content (null: delete), mode]
+  for (const f of new Set([...O.keys(), ...T.keys()])) {
+    if (OWN.includes(f)) continue;
+    const [b, o, t] = [B.get(f), O.get(f), T.get(f)], same = (x?: typeof b, y?: typeof b) => x?.oid === y?.oid && x?.mode === y?.mode;
+    if (same(o, t) || same(b, t)) continue;                     // the same, or the release didn't change it: the home's
+    if (same(b, o)) { writes.push([f, t ? await blob(t.oid) : null, t?.mode]); continue; }  // only the release changed it
+    const merged = b && o && t && merge3(await blob(b.oid), await blob(o.oid), await blob(t.oid));  // (and the x bit: whose changed)
+    if (merged != null) { writes.push([f, Buffer.from(merged), b!.mode === t!.mode ? o!.mode : t!.mode]); continue; }
+    if (t) writes.push([`${f}.new`, await blob(t.oid), t.mode]);
+    conflicts.push(!o ? `${f}: you had deleted it; this release changed it (its version: ${f}.new)`
+      : !t ? `${f}: this release removed it; you had changed it (yours is kept)`
+      : `${f}: you and this release changed the same lines (its version: ${f}.new)`);
+  }
+  try {  // (then saved: main moves only when every file is written)
+    for (const [f, content, mode] of writes) {
+      const p = path.join(HOME, f);
+      if (!content) {  // and the folders that leaves empty
+        fs.rmSync(p, { force: true });
+        for (let d = path.dirname(p); d !== AGENT && fs.existsSync(d) && !fs.readdirSync(d).length; d = path.dirname(d)) fs.rmdirSync(d);
+        continue;
+      }
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, content);
+      if (mode) fs.chmodSync(p, mode & 0o777);
+    }
+    await stage();
+    await git.commit({ ...REPO, message: main ? `Updated to ${RELEASE}` : `Started with ${RELEASE}`, author: CHALKY,
+      parent: main ? [main, pkg!] : [pkg!] });
+  } catch (e) {  // each file written goes back as main has it (contents and x bit), or away (.new files too)
+    for (const [f] of writes) {
+      const p = path.join(HOME, f), o = O.get(f);
+      try {
+        if (!o) { fs.rmSync(p, { force: true }); continue; }
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        fs.writeFileSync(p, await blob(o.oid));
+        fs.chmodSync(p, o.mode & 0o777);
+      } catch (e2) { console.error(`could not put ${f} back:`, e2); }
+    }
+    throw e;
+  }
+  const files = writes.length - writes.filter(([f]) => f.endsWith(".new")).length;
+  if (main) return { release: RELEASE, files, conflicts };  // (a new home: nothing to tell)
+}
+
+if (HOME !== ROOT) try { Object.assign(host, { update: await update() }); } catch (e: any) {  // run as it was: main didn't move
+  console.error(`update to ${RELEASE} failed:`, e);
+  const main = await ref("main");
+  if (main) await restore(main).catch((e) => console.error("could not put agent/ and built/ back as main has them:", e));  // and the index
+  Object.assign(host, { update: { release: RELEASE, error: String(e?.message ?? e) } });
+}
 
 // ---- recovery: the safety net for when an agent breaks the page (or the version extension, so its panel) ----
 // Here, not in an extension, so agents can't break it too. Plain HTML forms, no script: it works whatever agent/ holds.
@@ -315,7 +452,7 @@ async function recover(sha: string, res: http.ServerResponse) {
   const subject = `${sha.slice(0, 7)} ${(await git.readCommit({ ...REPO, oid: sha })).commit.message.split("\n")[0]}`;
   await stage();
   try { await git.commit({ ...REPO, message: "uncommitted changes before recovery", author, disallowEmpty: true }); } catch {}
-  await git.checkout({ ...REPO, ref: sha, noUpdateHead: true, force: true, filepaths: KEPT.filepaths });
+  await restore(sha);
   const files = await stage();
   for (const f of files) for (let d = path.dirname(f); !["agent", "built", "."].includes(d); d = path.dirname(d)) {  // folders it emptied
     try { fs.rmdirSync(path.join(HOME, d)); } catch { break; }
@@ -366,6 +503,11 @@ new WebSocketServer({ server, path: "/ws" }).on("connection", (sock) => {
 
 // agent1, then every agent saved by an earlier run (their conversations come back from their session files)
 await host.createAgent("agent1", "the user's main agent");
+const conflicts: string[] = (host as any).update?.conflicts ?? [];  // the update's files to merge: agent1's task
+if (conflicts.length) host.send("chalky", "agent1", `Chalky was updated to ${(host as any).update.release}. These files `
+  + `were changed both by you (or another agent) and by the update, so yours were kept:\n${conflicts.map((c) => `- ${c}`).join("\n")}\n`
+  + "For each, read both versions and make one that keeps what the user had and adds what the update brings, then "
+  + "delete the .new file. If you can't tell what the user would want, keep theirs and tell them what the update had.");
 for (const name of fs.readdirSync(path.join(DATA, "sessions")).filter((n) => n !== "agent1")) {
   const { role, app } = JSON.parse(fs.readFileSync(path.join(DATA, "sessions", name, "role.json"), "utf8"));
   await host.createAgent(name, role, app);

@@ -21,6 +21,9 @@ MODEL_BASE_URL=https://your-endpoint/v1 MODEL_API_KEY=... MODEL_NAME=your-model 
 
 Then open http://127.0.0.1:3000.
 
+To update: `npm update -g @chalky/chalky`, then restart `chalky`. The new version is merged with what your agents
+changed (see `agent/` below).
+
 | Variable | |
 |---|---|
 | `MODEL_BASE_URL` | the endpoint, up to `/v1` |
@@ -34,8 +37,11 @@ Then open http://127.0.0.1:3000.
 
 `~/.chalky` (or `CHALKY_HOME`) holds:
 
-- `agent/`: what the agents are: their prompt, settings and extensions (the page among them), copied from the
-  package on the first run. The agents edit it. A newer version of the package doesn't overwrite it.
+- `agent/`: what the agents are: their prompt, settings and extensions (the page among them). The agents edit it.
+  Each new version of the package is merged into it at the next start, as a version in the history: files only the
+  new version changed are updated, files only your agents changed stay theirs, and both changes go in when they
+  touch different lines. When both changed the same lines, yours stays, the new version waits next to it as
+  `<file>.new`, and agent1 merges the two. Undo an update like any change, in Versions.
 - `built/`: what the agents made for you: the cards on your boards, and the apps they wrote.
 - `data/`: what is kept while running: conversations, what you typed into cards and apps, notes, undo history.
 - `workspace/`: the agents' working folder; `workspace/drops/` holds your files.
