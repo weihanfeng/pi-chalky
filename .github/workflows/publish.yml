@@ -1,0 +1,62 @@
+# Publish @chalky/chalky to npm. Runs only when someone clicks "Run workflow" on GitHub
+# (Actions tab -> "Publish to npm"), typing the version to release. That click is the approval.
+#
+# What it does: sets the version in package.json, publishes to npm, then commits the bump to main
+# and tags it vX.Y.Z. No npm token: npm trusts this workflow file (Trusted Publishing, OIDC).
+name: Publish to npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 0.1.6 (no leading v)"
+        required: true
+        type: string
+
+permissions:
+  contents: write   # push the version commit and tag
+  id-token: write   # let GitHub hand npm a short-lived signed token (Trusted Publishing)
+
+concurrency: publish   # never two releases at once
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24.22.2
+          registry-url: https://registry.npmjs.org
+
+      # Trusted Publishing needs npm 11.5.1 or later.
+      - run: npm install -g npm@11.21.2
+
+      - name: Check the version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' || { echo "::error::'$VERSION' is not a version like 0.1.6"; exit 1; }
+          name=$(node -p 'require("./package.json").name')
+          if npm view "$name@$VERSION" version >/dev/null 2>&1; then echo "::error::$name@$VERSION is already on npm"; exit 1; fi
+
+      - name: Set the version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      - name: Publish
+        run: npm publish
+
+      - name: Commit and tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Release $VERSION" || echo "version already $VERSION in package.json"
+          git tag "v$VERSION"
+          git push origin main "v$VERSION"
