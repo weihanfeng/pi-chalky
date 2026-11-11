@@ -64,7 +64,8 @@ export default function (pi: ExtensionAPI) {
       + "long values are cut). Errors the page logs while it runs come back too. It is the user's live page: what you click "
       + "really happens, and they watch it. Helpers act as a person would, with your pointer moving there first: "
       + "await click(t), await type(t, text), await press(key, t?), await drag(t, dx, dy), read(t?) (what's on screen, "
-      + "as short lines), await wait(ms | selector | fn); t is an element, a CSS selector or its visible text. "
+      + "as short lines), await wait(ms | selector | fn); t is an element, a CSS selector, its visible text, or a spot "
+      + "{x, y} in window px (whatever is on top there, as with a real mouse: empty space, a drawing layer). "
       + "For acting, use the helpers: a bare el.click() happens at once, and the user only sees an outline afterwards. "
       + "If the user clicks or types on the page, they have taken over: stop and wait for their message.",
     parameters: Type.Object({

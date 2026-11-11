@@ -7,11 +7,15 @@
 // The code runs with the app frame's own Function (document and window are the app's) and gets helpers that act the
 // way a person would, slowly enough to watch: click, type, press, drag (the agent's pointer moves there first, then
 // the events a real hand makes fire), read (what's on screen, as short lines) and wait. Plain DOM code works too.
+// What to act on: an element, a CSS selector, its visible text, or a spot {x, y} (window px: whatever is on top there,
+// as with a real mouse; for empty space, and see-through layers like Point's).
 // What the user sees: the pointer (the agent's colour and name), an outline on each thing touched (also when code
 // skips the helpers: any event code makes, isTrusted false, while a run is on), and a notice (top right) while the agent is using
 // the page (from its first page_run to the end of its turn). The user's own click or key in the main space or an app
 // pauses it: the current helper stops, the agent hears "the user took over", later runs are refused until the user
 // presses "Let <agent> continue". While agent code runs, the page's Stop button and rollbacks refuse it.
+// What the page sends because of the agent's code (its click, key or drop set off a page message) carries
+// {by: <agent>}, so the extension that gets it can say who did it (frames: "agent1 pressed Implement", not "the user").
 // A run in a card first brings that card to the front (data-agent-front, until a run in another card) and scrolls it
 // into view, so the user sees it. If the app reloads or leaves during a run, the answer comes at once (pagehide).
 // The value comes back as short text: an element as tag#id "its text", anything else as JSON, cut at MAX characters.
@@ -38,6 +42,11 @@ export default function (page) {
   let busy = 0, mine = 0;  // runs going on; >0 while a helper fires its own events (they get their own outline)
   let refused = [];        // what the guard refused during the current run
   let codeClicked = false; // the last click on this page came from code
+  let byCode = false;      // the last click, key, input or drop came from code
+
+  // every page message goes through page.send (one pageApi for all plugins): while agent code acts, say whose it is
+  const send = page.send;
+  page.send = (obj) => send(busy && byCode && session ? { ...obj, by: session.agent } : obj);
 
   // ---------- what the user sees ----------
   const style = document.createElement("style");
@@ -135,6 +144,7 @@ export default function (page) {
     watched.add(doc);
     doc.addEventListener("pointerdown", takeOver, true);
     doc.addEventListener("keydown", takeOver, true);
+    for (const type of ["click", "keydown", "input", "change", "submit", "drop"]) doc.addEventListener(type, (e) => { byCode = !e.isTrusted; }, true);
     for (const type of ["click", "input", "change", "submit"]) doc.addEventListener(type, (e) => {
       if (!e.isTrusted && busy && !mine && session) outline(e.target, type === "click" ? "clicked" : type === "submit" ? "submitted" : "changed", session.agent);
     }, true);
@@ -160,15 +170,24 @@ export default function (page) {
     const w = doc.defaultView;
     function fire(el, type, init = {}) {
       const C = type.startsWith("pointer") ? w.PointerEvent : type.startsWith("key") ? w.KeyboardEvent
-        : type === "input" ? w.InputEvent : /^(mouse|click|dblclick)/.test(type) ? w.MouseEvent : w.Event;
+        : type === "input" ? w.InputEvent : /^(drag|drop)/.test(type) ? w.DragEvent
+        : /^(mouse|click|dblclick)/.test(type) ? w.MouseEvent : w.Event;
       const bubbles = !/^(pointerenter|pointerleave|mouseenter|mouseleave|focus|blur)$/.test(type);
       mine++;
       try { return el.dispatchEvent(new C(type, { bubbles, cancelable: true, composed: true, view: w, ...init })); } finally { mine--; }
     }
     const label = (el) => norm(el.getAttribute?.("aria-label") || el.placeholder || (el.labels?.[0]?.innerText) || el.innerText || el.value || el.title || el.alt || "");
     const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && w.getComputedStyle(el).visibility !== "hidden"; };
+    // A spot {x, y} (window px of this document, as screen_see shows them) is where a real mouse would be: the thing on
+    // top there gets the events (a see-through layer like Point's, empty main space), at exactly that spot.
+    const isSpot = (t) => typeof t?.x === "number" && typeof t?.y === "number" && !t.nodeType;
     function find(t, typing) {
       if (t?.nodeType === 1) return t;
+      if (isSpot(t)) {
+        const el = doc.elementFromPoint(t.x, t.y);
+        if (!el) throw new Error(`nothing at x ${t.x}, y ${t.y}: the window is ${w.innerWidth}x${w.innerHeight}`);
+        return el;
+      }
       if (typeof t !== "string" || !t) throw new Error("name what to act on: an element, a CSS selector, or its visible text");
       try { const el = doc.querySelector(t); if (el) return el; } catch {}  // not a selector: it's text
       const want = norm(t).toLowerCase();
@@ -188,9 +207,10 @@ export default function (page) {
       el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
       await sleep(450);
     }
-    async function moveTo(el) {
-      gate(); await reveal(el);
-      const s = spot(el), p = toTop(doc, s.x, s.y);
+    async function moveTo(el, target) {  // target a spot: go exactly there (it is in the window already: no scrolling)
+      gate();
+      if (!isSpot(target)) await reveal(el);
+      const s = isSpot(target) ? { x: target.x, y: target.y } : spot(el), p = toTop(doc, s.x, s.y);
       pointer.querySelector("path").setAttribute("fill", colour(agent));
       Object.assign(pointer.querySelector("span"), { textContent: agent }).style.background = colour(agent);
       pointer.classList.add("on"); clearTimeout(hideTimer);
@@ -217,12 +237,12 @@ export default function (page) {
 
     const api = {
       async click(target) {
-        const el = find(target), { s, p } = await moveTo(el);
+        const el = find(target), { s, p } = await moveTo(el, target);
         ripple(p.x, p.y, agent); press1(el, s); outline(el, label(el) || el.localName, agent);
         await sleep(PACE.afterClick);
       },
       async type(target, text, { add = false } = {}) {
-        const el = find(target, true), { s, p } = await moveTo(el);
+        const el = find(target, true), { s, p } = await moveTo(el, target);
         ripple(p.x, p.y, agent); press1(el, s);
         text = String(text);
         if (el.localName === "select") {  // a dropdown: pick the option with that text (or value)
@@ -255,7 +275,7 @@ export default function (page) {
       },
       async press(key, target) {
         const el = target ? find(target) : doc.activeElement && doc.activeElement !== doc.body ? doc.activeElement : doc.body;
-        if (target) await moveTo(el);
+        if (target) await moveTo(el, target);
         gate();
         const k = keyInit(key), go = fire(el, "keydown", k);
         if (go) {  // what a browser does by itself for a real key, which events from code don't trigger
@@ -272,20 +292,31 @@ export default function (page) {
         outline(el, `pressed ${key}`, agent);
         await sleep(PACE.afterClick);
       },
-      async drag(target, dx, dy = 0) {  // by dx, dy px, or onto another thing: drag(a, b)
-        const el = find(target), { s } = await moveTo(el);
-        const to = typeof dx === "number" ? { x: s.x + dx, y: s.y + dy } : spot(find(dx));
+      async drag(target, dx, dy = 0) {  // by dx, dy px, or onto another thing or a spot: drag(a, b)
+        const el = find(target), { s } = await moveTo(el, target);
+        const to = typeof dx === "number" ? { x: s.x + dx, y: s.y + dy } : isSpot(dx) ? { x: dx.x, y: dx.y } : spot(find(dx));
+        // A draggable thing (draggable="true", e.g. a file row) moves by the browser's drag-and-drop, which code
+        // can't start: fire its events ourselves, with one DataTransfer from dragstart to drop, as the browser would.
+        const source = el.closest('[draggable="true"]'), data = source && new w.DataTransfer();
         fire(el, "pointerdown", at(s, { buttons: 1 })); fire(el, "mousedown", at(s, { buttons: 1 }));
-        let over = el;
+        const dragging = source && fire(source, "dragstart", at(s, { buttons: 1, dataTransfer: data }));  // cancelled: no drag
+        let over = el, accepted = false;
         for (let i = 1; i <= 12; i++) {
           const q = { x: s.x + (to.x - s.x) * i / 12, y: s.y + (to.y - s.y) * i / 12 }, p = toTop(doc, q.x, q.y);
           pointer.style.transition = "transform 40ms linear, opacity .3s"; pointer.style.transform = `translate(${p.x}px, ${p.y}px)`; px = p.x; py = p.y;
-          over = doc.elementFromPoint(q.x, q.y) ?? el;
-          fire(over, "pointermove", at(q, { buttons: 1 })); fire(over, "mousemove", at(q, { buttons: 1 }));
+          const now = doc.elementFromPoint(q.x, q.y) ?? el;
+          if (dragging) {
+            if (now !== over) { fire(over, "dragleave", at(q, { dataTransfer: data })); fire(now, "dragenter", at(q, { buttons: 1, dataTransfer: data })); }
+            accepted = !fire(now, "dragover", at(q, { buttons: 1, dataTransfer: data }));  // a drop target cancels dragover
+          } else { fire(now, "pointermove", at(q, { buttons: 1 })); fire(now, "mousemove", at(q, { buttons: 1 })); }
+          over = now;
           await sleep(45);
         }
-        fire(over, "pointerup", at(to)); fire(over, "mouseup", at(to));
-        outline(el, "dragged", agent);
+        if (dragging) {
+          if (accepted) fire(over, "drop", at(to, { dataTransfer: data }));
+          fire(source, "dragend", at(to, { dataTransfer: data }));
+        } else { fire(over, "pointerup", at(to)); fire(over, "mouseup", at(to)); }
+        outline(el, accepted ? "dragged and dropped" : "dragged", agent);
         await sleep(PACE.afterClick);
       },
       read(target, { all = false } = {}) {  // what's on screen: headings, controls (with value and state), short texts

@@ -8,7 +8,7 @@
 // can remove a frame (its ✕); if it was sent, its agent is told. Until a frame is sent, its corner resizes it.
 //   GET /frame              {id: frame}
 //   page messages           frame_add {x, y, width, height, board}, frame_place {id, x, y, width, height}, frame_text {id, text},
-//                           frame_remove {id}, frame_send {to, board}
+//                           frame_remove {id}, frame_send {to, board, by?} (by: the agent whose code pressed Implement)
 //   event "frame"           {frames: {id: frame}} to every open page, when they changed
 // Saved in data/frame.json as {last: <last id number>, frames: {id: frame}}; shared by every agent (host.shared).
 import fs from "node:fs";
@@ -77,7 +77,9 @@ export default function (pi: ExtensionAPI) {
       if (!ready.length) return;
       for (const [, f] of ready as any) Object.assign(f, { sent: true, to });
       changed();
-      const lines = [`[frames on the page] the user laid out ${ready.length} frame${ready.length > 1 ? "s" : ""} on board ${board} to fill:`,
+      // by: an agent's code pressed Implement (page/browser.js), not the user
+      const who = !msg.by ? "the user laid out" : msg.by === to ? "you pressed Implement for" : `${msg.by} pressed Implement for`;
+      const lines = [`[frames on the page] ${who} ${ready.length} frame${ready.length > 1 ? "s" : ""} on board ${board} to fill:`,
         ...ready.map(([id, f]: any) => `  ${id}: "${f.text}" · place=${place(f)}`),
         `  Fill each with card_show(place=<its place>, board=${board}, ...) (any card id): its dashed box goes when a card appears there.`];
       const waiting = Object.keys(frames).filter((id) => frames[id].sent && !ready.some(([r]) => r === id));

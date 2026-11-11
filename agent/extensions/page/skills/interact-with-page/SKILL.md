@@ -16,12 +16,16 @@ and typing goes letter by letter, so the user can follow.
   that text; a slider, date or colour field is set to that value.
 - `await press(key, t?)`: Enter, Escape, Tab, ArrowDown, "Ctrl+z"... to t, else to what has focus. Enter in a form
   field submits the form.
-- `await drag(t, dx, dy)` by pixels, or `await drag(t, other)` onto another thing.
+- `await drag(t, dx, dy)` by pixels, or `await drag(t, other)` onto another thing. A draggable thing (a file row)
+  is dragged and dropped as the browser does it, so drop targets get it.
 - `read(t?)`: what's on screen as short lines: headings, controls with their value and state ([selected],
   [checked], [disabled]), short texts. Only what's in view; `read(null, {all: true})` for the whole page.
 - `await wait(ms)`, `await wait(".row.new")` (until it appears), `await wait(() => condition)`.
 
-t is an element, a CSS selector, or the visible text: a button's words, a field's placeholder or label.
+t is an element, a CSS selector, or the visible text: a button's words, a field's placeholder or label. Or a spot
+`{x: 600, y: 300}` in window px (screen_see's picture, or an element's getBoundingClientRect()): whatever is on top
+there gets it, as with a real mouse. Use a spot for empty space (`await drag({x: 400, y: 300}, 300, 200)` draws a
+frame there) and for tools that work through a layer over the page (Point: click the tool, then the spot).
 ```
 page_run(card="habit-tracker", code=`await type("New habit", "Drink water");
   await click("Add habit");
@@ -47,8 +51,8 @@ While you use the page a bar says so, with a Stop button. If the user clicks or 
 - It's the live page: clicks really happen and data really changes. Touch only what your task needs, and don't send
   messages through the chat box.
 - The page's Stop button and rollbacks refuse code: they are the user's.
-- Events from code are not quite real input: hover styles, native dropdown lists, file pickers, copy and paste, and
-  HTML drag-and-drop (draggable) don't respond. For those, and for other window sizes, use the browser-check skill
+- Events from code are not quite real input: hover styles, native dropdown lists, file pickers, and copy and paste
+  don't respond. For those, and for other window sizes, use the browser-check skill
   (a separate headless browser).
 - Errors the page logs while your code runs come back with the answer: read them.
 - An answer marked "not on the board the user is looking at" ran on a card they can't see right now.

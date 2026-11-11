@@ -9,7 +9,8 @@
 // tells every open page to pin it, with its drawing). Esc or the button turns it off.
 // Pins: a numbered pin per note (the agents' in their colour), on the thing it is on, scrolling with the main space
 // and moving with its card. Click one for its thread: who wrote what, a reply box (Enter sends it to the note's
-// agent), ✓ Done; a closed note stays as a faded ✓ (Reopen, or Delete for good). An agent's reply opens the bubble while
+// agent), ✓ (close) and ✕ (delete) at its top right; a closed note stays as a faded ✓ (Reopen). ✕ asks nothing: the pin
+// goes, a notice offers Undo for a few seconds, and only then is the delete sent. An agent's reply opens the bubble while
 // the note stays open. Show marks (doodle/)
 // hides the pins with the other marks.
 // The same note box opens for two more things (Enter on an empty box sends its faded suggestion):
@@ -246,6 +247,9 @@ export default async function (page) {
     .note-pin .bubble .busy { color: var(--muted, #888); font-style: italic; }
     .note-pin .bubble textarea { width: 100%; box-sizing: border-box; min-height: 48px; resize: vertical; font: inherit; padding: 6px 8px;
       border-radius: 8px; border: 1px solid rgba(0, 0, 0, .15); outline: none; background: rgba(255, 255, 255, .8); }
+    .note-pin .bubble .top { float: right; display: flex; gap: 2px; margin: -4px -6px 0 6px; }
+    .note-pin .bubble .top button { width: 24px; height: 24px; border-radius: 6px; font-size: 13px; color: var(--soft, #555); }
+    .note-pin .bubble .top button:hover { background: var(--hover, rgba(0, 0, 0, .05)); color: var(--text, #1d1d1f); }
     .note-pin .bubble .acts { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
     .note-pin .bubble .acts button { padding: 3px 10px; border-radius: 999px; font-size: 12px; border: 1px solid rgba(0, 0, 0, .12); }
     .note-pin .bubble .acts button.primary { color: #fff; background: var(--accent, #0071e3); border-color: transparent; }`;
@@ -262,7 +266,21 @@ export default async function (page) {
     if (card) { const r = card.getBoundingClientRect(), c = inMain(r.left, r.top); return { x: c.x + n.anchor.dx, y: c.y + n.anchor.dy }; }
     return n.at ?? { x: 0, y: 0 };
   }
+  // Deleting: the pin goes at once, and a notice offers Undo for UNDO_MS; only then is the delete sent (so an undo
+  // needs nothing from the server, and other pages keep the note until it is really gone)
+  const UNDO_MS = 6000;
+  const leaving = {};  // id -> timer, while its undo is offered
+  function remove(id) {
+    openId = null;
+    pins[id]?.remove(); delete pins[id];
+    const undo = Object.assign(document.createElement("button"), { type: "button", className: "go", textContent: "Undo" });
+    const notice = page.notice(["Note deleted", undo], () => {});
+    const gone = () => { delete leaving[id]; notice.close(); page.send({ type: "note_delete", id }); };
+    leaving[id] = setTimeout(gone, UNDO_MS);
+    undo.onclick = () => { clearTimeout(leaving[id]); delete leaving[id]; notice.close(); if (notes[id]) draw(id); };
+  }
   function draw(id) {
+    if (id in leaving) return;  // deleted, its undo still offered
     const n = notes[id];
     let el = pins[id];
     if (!el) {
@@ -309,6 +327,16 @@ export default async function (page) {
       b.onclick = fn;
       acts.append(b);
     };
+    // top right: ✓ closes (a faded pin, can be reopened), ✕ deletes (no question: a few seconds to undo instead)
+    const top = Object.assign(document.createElement("div"), { className: "top" });
+    const corner = (text, title, fn) => {
+      const b = Object.assign(document.createElement("button"), { type: "button", textContent: text, title });
+      b.onclick = fn;
+      top.append(b);
+    };
+    if (n.state === "open") corner("✓", "Done: close this note", () => { openId = null; page.send({ type: "note_close", id }); });
+    corner("✕", "Delete this note", () => remove(id));
+    d.prepend(top);
     if (n.state === "open") {
       const ta = Object.assign(document.createElement("textarea"), { placeholder: "Reply… (Enter sends)", value: drafts[id] ?? "" });
       ta.oninput = () => { drafts[id] = ta.value; };
@@ -319,13 +347,9 @@ export default async function (page) {
         if (e.key === "Escape") { openId = null; draw(id); }
       };
       d.append(ta);
-      button("✓ Done", () => { openId = null; page.send({ type: "note_close", id }); });
       button("Reply", go, true);
       setTimeout(() => ta.focus(), 0);
-    } else {
-      button("Delete", () => { if (confirm("Delete this note for good?")) { openId = null; page.send({ type: "note_delete", id }); } });
-      button("Reopen", () => page.send({ type: "note_reopen", id }));
-    }
+    } else button("Reopen", () => page.send({ type: "note_reopen", id }));
     d.append(acts);
     return d;
   }

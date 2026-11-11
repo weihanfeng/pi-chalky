@@ -32,4 +32,6 @@ thing has partAt), its text, and the file it comes from. Act on that exact thing
   pointer ("this one") use the pen (doodle_mark) instead.
 - When you did what a note asked, note_done(id): its pin turns into a faded ✓, which the user can reopen or delete. If your
   answer leaves anything to them (you suggest something, ask, or offer a choice), leave the note open: their reply
-  comes in the same thread, and you close it once that is settled. The user can close one too (✓ Done); you get an fyi.
+  comes in the same thread, and you close it once that is settled. The user can close one too (✓) or delete it (✕);
+  you get an fyi. A note you started that is no longer needed (it explained a step, the step is past) can go for
+  good: note_done(id, delete: true). Notes the user or another agent started you only close.

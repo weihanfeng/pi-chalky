@@ -3,7 +3,8 @@
 // the page (from the computer: uploaded here, listed, and a "file-dropped" DOM event so note's browser.js opens its note
 // box there; onto the panel itself: only stored; a row from the panel: the same event with that file).
 // The agent always knows the folder (its prompt section); files it saves there show in the panel too (the list is
-// sent again when an agent's turn is over: pi's agent_settled).
+// sent again after each of its tool calls, pi's tool_execution_end, if it changed: a file it saves shows at once,
+// while it is still working).
 //   POST /file/upload?name=<file name>  the file's bytes: saved in DIR (a safe, new name), returns {path, size}
 //   GET  /file                           [{name, path, size}], newest first; files in folders too ("q3/costs.xlsx")
 //   POST /file/delete                   {names: [...]} (names as listed): deleted for good, returns {deleted, errors}
@@ -37,7 +38,7 @@ function changed(always = false) {  // tell the pages, if the list is not what t
 }
 
 export default function (pi: ExtensionAPI) {
-  pi.on("agent_settled", () => changed());  // the agent may have saved files there
+  pi.on("tool_execution_end", () => changed());  // the agent may have saved files there
   if (!host.shared.has("file-last")) host.shared.set("file-last", JSON.stringify(listing()));
 
   host.routes.set("/file", (_req: any, res: any) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(listing())));

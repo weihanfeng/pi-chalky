@@ -6,10 +6,12 @@
 //   note_combine     the user dragged card a onto card b and wrote how to combine them. The agent changes b to
 //                    take a in, reading a's data live ({"ref"} props); a stays as it is.
 //   note_reply       the user wrote in a note's thread (its bubble): it goes to the note's agent, with the thread so far
-//   note_close / note_reopen / note_delete   the user's ✓ Done in the bubble; Reopen or Delete (for good) on a closed one
+//   note_close / note_reopen / note_delete   the user's ✓ (close) or ✕ (delete, for good; open or closed) at the
+//                    bubble's top right, Reopen on a closed one
 // The agents' tools: note_add(on, text) starts a thread on a thing (on: as doodle_mark's, checked on the open page),
-// note_reply(id, text) writes in one, note_done(id) closes one. A closed note stays as a faded ✓ pin (the user can
-// reopen or delete it); the agents never delete notes, and a removed board takes its notes with it.
+// note_reply(id, text) writes in one, note_done(id) closes one, note_done(id, delete: true) removes one the agent started
+// (never the user's or another agent's). A closed note stays as a faded ✓ pin (the user can reopen or delete it); a
+// removed board takes its notes with it.
 // Each note goes to the card's owner (else the agent picked in the chat; an agent's own note: that agent), gets an id
 // (n1, n2, ...: never reused) and is saved: data/note.json {"last", "notes": {id: {thread: [{by, text, ts}], to, by,
 // board, state: "open" | "done", at: {x, y} (main px), anchor: {card, dx, dy}, stroke, target?, box?}}}. The pin sits
@@ -40,6 +42,12 @@ const save = () => fs.writeFileSync(FILE, JSON.stringify(D));
 const result = (text: string) => ({ content: [{ type: "text" as const, text }], details: undefined });
 const show = (id: string) => host.broadcast("note_pin", { id, ...D.notes[id] });
 const opened = () => Object.keys(D.notes).filter((id) => D.notes[id].state === "open");
+const remove = (id: string) => {  // a note, for good: off every page
+  delete D.notes[id];
+  items.delete(id);
+  save();
+  host.broadcast("note_gone", { id });
+};
 
 function pin(note: any) {  // a new note: saved, pinned on every page
   const id = `n${++D.last}`;
@@ -114,10 +122,18 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "note_done", label: "Note done", description: "Close a note that is dealt with (you did what it asked): its pin turns into a faded ✓ (the user can "
-      + "reopen it). Not while your answer waits on the user (a suggestion, a question).",
-    parameters: Type.Object({ id: Type.String({ description: "e.g. n3" }) }),
+      + "reopen it). Not while your answer waits on the user (a suggestion, a question). With delete: true, a note you started "
+      + "goes from the page instead (open or closed), e.g. one that explained a step and has served its purpose.",
+    parameters: Type.Object({ id: Type.String({ description: "e.g. n3" }),
+      delete: Type.Optional(Type.Boolean({ description: "remove it from the page for good: only notes you started" })) }),
     async execute(_id, a) {
       const n = D.notes[a.id];
+      if (a.delete) {
+        if (!n) return result(`error: no note '${a.id}'`);
+        if (n.by !== me()) return result(`error: ${a.id} was started by ${n.by === "user" ? "the user" : n.by}: only its starter deletes it. Close it instead (note_done without delete).`);
+        remove(a.id);
+        return result(`note ${a.id} is gone from the page`);
+      }
       if (!n || n.state !== "open") return result(`error: no open note '${a.id}'. Open notes: ${opened().join(", ") || "none"}`);
       n.state = "done";
       items.delete(a.id);
@@ -142,12 +158,11 @@ export default function (pi: ExtensionAPI) {
       return;
     }
     if (msg.type === "note_reopen" && n?.state === "done") { n.state = "open"; save(); return show(msg.id); }
-    if (msg.type === "note_delete" && n?.state === "done") {  // a closed note, for good
-      delete D.notes[msg.id];
-      items.delete(msg.id);
-      save();
-      host.broadcast("note_gone", { id: msg.id });
-      if (host.agents.has(n.to)) team?.fyi("page", n.to, `[note on the page] the user deleted note ${msg.id} ("${n.thread[0]?.text}"): it is gone from the page.`);
+    if (msg.type === "note_delete" && n) {  // open or closed, for good
+      const item = items.get(msg.id);
+      remove(msg.id);
+      if (host.agents.has(n.to) && !(item && team?.withdraw(item)))  // not seen yet: just take it back
+        team?.fyi("page", n.to, `[note on the page] the user deleted note ${msg.id} ("${n.thread[0]?.text}"): it is gone from the page; drop it if you haven't finished it.`);
       return;
     }
     if (msg.type === "note_reply" && n && team && String(msg.text ?? "").trim()) {
