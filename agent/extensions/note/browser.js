@@ -10,7 +10,7 @@
 // Pins: a numbered pin per note (the agents' in their colour), on the thing it is on, scrolling with the main space
 // and moving with its card. Click one for its thread: who wrote what, a reply box (Enter sends it to the note's
 // agent), ✓ (close) and ✕ (delete) at its top right; a closed note stays as a faded ✓ (Reopen). ✕ asks nothing: the pin
-// goes, a notice offers Undo for a few seconds, and only then is the delete sent. An agent's reply opens the bubble while
+// goes, a notice offers Undo for a few seconds, and only then is the delete sent. An agent's new note, or its reply, opens the bubble while
 // the note stays open. Show marks (doodle/)
 // hides the pins with the other marks.
 // The same note box opens for two more things (Enter on an empty box sends its faded suggestion):
@@ -301,6 +301,7 @@ export default async function (page) {
     }
     const b = Object.assign(document.createElement("button"), { className: "pin", type: "button", textContent: n.state === "open" ? id.slice(1) : "✓",
       title: `${n.thread[0]?.text ?? ""}${n.state === "open" ? "" : " (closed)"}` });
+    b.setAttribute("aria-label", `note ${id}${n.state === "open" ? "" : " (closed)"}: ${n.thread[0]?.text ?? ""}`);  // what read() and screen readers say
     Object.assign(b.style, { left: `${p.x}px`, top: `${p.y}px` });
     b.onclick = (e) => { e.stopPropagation(); openId = openId === id ? null : id; for (const k of Object.keys(pins)) draw(k); };
     el.append(b);
@@ -362,8 +363,9 @@ export default async function (page) {
   setInterval(layout, 1500);
   page.on("note_pin", ({ id, type, agent, ts, ...n }) => {
     const reply = notes[id] && n.thread.length > notes[id].thread.length && n.thread.at(-1).by !== "user" && n.state === "open";  // an answer still waiting on the user
+    const started = !notes[id] && n.by !== "user" && n.state === "open";  // an agent's new note (the notes there at load come from /note/all)
     notes[id] = n;
-    if (reply && openId !== id) openId = id;  // an agent answered in the thread: show it
+    if ((reply || started) && openId !== id) openId = id;  // an agent wrote: show it open, so the user sees it
     if (openId === id && n.state !== "open" && n.thread.at(-1)?.by !== "user") openId = null;  // and closed it: done, so out of the way
     draw(id);
   });

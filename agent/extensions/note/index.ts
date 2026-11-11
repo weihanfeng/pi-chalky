@@ -3,6 +3,7 @@
 //   note_add (page)  click anything on the page (or draw around an area) and write: the target is the card,
 //                    block, element, part (partAt), its text and source file, the spot and the area.
 //                    Files dropped on the page come as a note too ("files": paths in <workspace>/drops).
+//                    Written by an agent's code through the page (msg.by, page/browser.js): that agent's own note.
 //   note_combine     the user dragged card a onto card b and wrote how to combine them. The agent changes b to
 //                    take a in, reading a's data live ({"ref"} props); a stays as it is.
 //   note_reply       the user wrote in a note's thread (its bubble): it goes to the note's agent, with the thread so far
@@ -178,10 +179,17 @@ export default function (pi: ExtensionAPI) {
     }
     if (!["note_add", "note_combine"].includes(msg.type) || !team) return;
     host.api.doodle?.dim();
-    const to = host.agents.has(msg.to) ? msg.to : "agent1";
     const text = msg.text ?? "";
-    const note = { to, by: "user", board: Number(msg.board) || 1, at: msg.at ?? { x: 0, y: 0 }, ...(msg.anchor && { anchor: msg.anchor }),
+    const base = { board: Number(msg.board) || 1, at: msg.at ?? { x: 0, y: 0 }, ...(msg.anchor && { anchor: msg.anchor }),
                    stroke: msg.stroke ?? null };  // with its drawing, if any (main px)
+    // an agent's code wrote it through the page's tools (msg.by, page/browser.js): that agent's own note, as if it
+    // called note_add; nothing to tell it, it knows (the reply to page_run says what happened)
+    if (host.agents.has(msg.by)) {
+      pin({ ...base, to: msg.by, by: msg.by, thread: [{ by: msg.by, text: msg.type === "note_combine" ? `combine ${msg.a} into ${msg.b}: ${text}` : text, ts: Date.now() }] });
+      return;
+    }
+    const to = host.agents.has(msg.to) ? msg.to : "agent1";
+    const note = { ...base, to, by: "user" };
     if (msg.type === "note_combine") {
       const { a, b } = msg;
       const madeFrom = [...(host.shared.get("card")?.cards[b]?.made_from ?? []).filter((m: string) => m !== a), a];

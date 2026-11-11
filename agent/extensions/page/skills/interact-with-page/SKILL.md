@@ -19,7 +19,8 @@ and typing goes letter by letter, so the user can follow.
 - `await drag(t, dx, dy)` by pixels, or `await drag(t, other)` onto another thing. A draggable thing (a file row)
   is dragged and dropped as the browser does it, so drop targets get it.
 - `read(t?)`: what's on screen as short lines: headings, controls with their value and state ([selected],
-  [checked], [disabled]), short texts. Only what's in view; `read(null, {all: true})` for the whole page.
+  [checked], [disabled]), short texts. Only what's in view; `read(null, {all: true})` for the whole page. The
+  conversation (the chat log) is left out: you know it; `read("#log")` if you need it.
 - `await wait(ms)`, `await wait(".row.new")` (until it appears), `await wait(() => condition)`.
 
 t is an element, a CSS selector, or the visible text: a button's words, a field's placeholder or label. Or a spot

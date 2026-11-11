@@ -242,9 +242,25 @@ export default function (page) {
         await sleep(PACE.afterClick);
       },
       async type(target, text, { add = false } = {}) {
-        const el = find(target, true), { s, p } = await moveTo(el, target);
+        let el = find(target, true);
+        const { s, p } = await moveTo(el, target);
         ripple(p.x, p.y, agent); press1(el, s);
         text = String(text);
+        if (isSpot(target)) {  // as a keyboard would: into what the click focused, else as keys to the page (Text's words)
+          await sleep(120);
+          const f = doc.activeElement;
+          if (f?.matches?.("input, textarea, select") || f?.isContentEditable) el = f;
+          else {
+            for (const ch of text) {
+              gate();
+              const k = keyInit(ch === "\n" ? "Enter" : ch === " " ? "Space" : ch);
+              fire(f ?? doc.body, "keydown", k); fire(f ?? doc.body, "keyup", k);
+              await sleep(PACE.keyMin + Math.random() * (PACE.keyMax - PACE.keyMin));
+            }
+            outline(el, `typed "${short(text, 24)}"`, agent);
+            return sleep(PACE.afterClick);
+          }
+        }
         if (el.localName === "select") {  // a dropdown: pick the option with that text (or value)
           const o = [...el.options].find((o) => norm(o.text).toLowerCase() === norm(text).toLowerCase() || o.value === text);
           if (!o) throw new Error(`"${label(el)}" has no option "${text}": ${[...el.options].map((o) => o.text).join(", ")}`);
@@ -321,9 +337,12 @@ export default function (page) {
       },
       read(target, { all = false } = {}) {  // what's on screen: headings, controls (with value and state), short texts
         const root = target ? find(target) : doc.body, lines = [];
+        // the conversation (#log) and the working rows are what the agent already knows, and on Chalky's page they
+        // drown out the rest: left out, unless asked for by name (read("#log"))
+        const known = doc === document && !root.closest("#log, #working") ? "#log, #working" : null;
         let out = 0;
         for (const el of [...(target ? [root] : []), ...root.querySelectorAll("*")]) {
-          if (el.closest("script, style, template, noscript")) continue;
+          if (el.closest("script, style, template, noscript") || (known && el.closest(known))) continue;
           const control = el.matches(ACTIVE) && el.localName !== "label", heading = /^h[1-6]$/.test(el.localName);
           const text = !el.children.length ? norm(el.innerText) : "";
           if (!control && !heading && !(text && text.length <= 80)) continue;
