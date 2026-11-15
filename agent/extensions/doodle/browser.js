@@ -175,13 +175,14 @@ export default async function (page) {
   const picture = (full, box) => screen.picture(full, box);  // crop a frame to box (window px) and upload it: {path, url}
 
   // ---- where things are ----
+  const zoom = () => parseFloat(area.style.zoom) || 1;  // the board's zoom (board/browser.js): window px per main px (and per app-frame px)
   const inMain = (x, y) => {  // window px -> main-space px (as note/browser.js)
-    const m = area.getBoundingClientRect();
-    return { x: x - m.left + area.scrollLeft, y: y - m.top + area.scrollTop };
+    const m = area.getBoundingClientRect(), z = zoom();
+    return { x: (x - m.left) / z + area.scrollLeft, y: (y - m.top) / z + area.scrollTop };
   };
   const inWindow = (p) => {
-    const m = area.getBoundingClientRect();
-    return { x: p.x + m.left - area.scrollLeft, y: p.y + m.top - area.scrollTop };
+    const m = area.getBoundingClientRect(), z = zoom();
+    return { x: m.left + (p.x - area.scrollLeft) * z, y: m.top + (p.y - area.scrollTop) * z };
   };
   const short = (s, n = 40) => { s = (s || "").replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n - 1) + "…" : s; };
 
@@ -266,7 +267,7 @@ export default async function (page) {
     const at = inMain(box.x, box.y);  // the part of the main space the picture shows, so the agent can place things
     const step = { drawn: marks.length > 0, words: marks.filter((m) => m.text).map((m) => m.text), then: [], shot: null,
                    board: Number(document.body.dataset.board) || 1,  // the board shown (board/)
-                   area: { x: Math.round(at.x), y: Math.round(at.y), width: Math.round(box.w), height: Math.round(box.h) } };
+                   area: { x: Math.round(at.x), y: Math.round(at.y), width: Math.round(box.w / zoom()), height: Math.round(box.h / zoom()) } };
     step.ready = full ? picture(full, box).then((s) => { step.shot = s; }, () => {}) : Promise.resolve();
     steps.push(step);
     for (const m of marks) m.el.remove();
@@ -303,10 +304,10 @@ export default async function (page) {
       doc.head.append(s);
       classes(doc.documentElement);
     }
-    const offset = () => {
-      if (!frameEl) return { x: 0, y: 0 };
-      const r = frameEl.getBoundingClientRect();
-      return { x: r.left + frameEl.clientLeft, y: r.top + frameEl.clientTop };
+    const offset = () => {  // an app frame's (0, 0) in window px, and window px per frame px (k: zoomed with the main space)
+      if (!frameEl) return { x: 0, y: 0, k: 1 };
+      const r = frameEl.getBoundingClientRect(), k = zoom();
+      return { x: r.left + frameEl.clientLeft * k, y: r.top + frameEl.clientTop * k, k };
     };
     const root = frameEl ? doc : area;
     root.addEventListener("pointerdown", (e) => {
@@ -316,16 +317,16 @@ export default async function (page) {
       if (erasing) {  // the press is for the eraser, not for what's under it
         e.preventDefault();
         press = { erase: true, win };
-        eraseAt(inMain(e.clientX + o.x, e.clientY + o.y));
+        eraseAt(inMain(o.x + e.clientX * o.k, o.y + e.clientY * o.k));
         return;
       }
       grabbed = marks.length ? frame() : null;  // before the click acts
       if (e.target.closest?.(texting && !drawing ? ".doodle-note" : OWN_DRAG)) return;
       if (texting) e.preventDefault();  // the press is for the words (or a line), not for what's under it
-      press = { x: e.clientX + o.x, y: e.clientY + o.y, id: e.pointerId, target: e.target, win, o, text: texting };
+      press = { x: o.x + e.clientX * o.k, y: o.y + e.clientY * o.k, id: e.pointerId, target: e.target, win, o, text: texting };
     }, true);
     win.addEventListener("pointermove", (e) => {
-      const o = offset(), x = e.clientX + o.x, y = e.clientY + o.y;
+      const o = offset(), x = o.x + e.clientX * o.k, y = o.y + e.clientY * o.k;
       over = frameEl || e.target.closest?.("#top") ? { x, y } : null;
       if (press?.erase && press.win === win) { win.getSelection().removeAllRanges(); eraseAt(inMain(x, y)); return; }
       if (!press || press.win !== win || !drawing) return;
@@ -495,7 +496,7 @@ export default async function (page) {
     hideAsk();
     const last = marks.at(-1).points.at(-1), to = document.getElementById("to")?.value || "agent1";
     ask = Object.assign(document.createElement("form"), { className: "doodle-ask" });
-    const m = area.getBoundingClientRect(), room = inMain(m.left + area.clientWidth - 316, m.bottom - 140);  // inside the view (not under the scrollbar)
+    const m = area.getBoundingClientRect(), z = zoom(), room = inMain(m.left + (area.clientWidth - 316) * z, m.bottom - 140 * z);  // inside the view (not under the scrollbar)
     Object.assign(ask.style, { left: `${Math.min(last.x + 16, room.x)}px`, top: `${Math.min(last.y + 12, room.y)}px` });
     const field = Object.assign(document.createElement("input"), { placeholder: `Say something… (Enter sends to ${to})`, autocomplete: "off" });
     field.setAttribute("aria-label", "Words to send with your marks");
@@ -527,10 +528,11 @@ export default async function (page) {
   const distBox = (b, q) => Math.hypot(Math.max(b.x - q.x, 0, q.x - b.x - b.w), Math.max(b.y - q.y, 0, q.y - b.y - b.h));
   const inPoly = (pts, q) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const a = pts[i], b = pts[j];
                                if ((a.y > q.y) !== (b.y > q.y) && q.x < (b.x - a.x) * (q.y - a.y) / (b.y - a.y) + a.x) c = !c; } return c; };
-  const frameOffset = (fr) => { const r = fr.getBoundingClientRect(); return { x: r.left + fr.clientLeft, y: r.top + fr.clientTop }; };
-  function rectOf(el, fr) {  // an element (or a Range), in main px; fr: the app frame it is in
-    const r = el.getBoundingClientRect(), o = fr ? frameOffset(fr) : { x: 0, y: 0 }, p = inMain(r.left + o.x, r.top + o.y);
-    return { x: p.x, y: p.y, w: r.width, h: r.height };
+  const frameOffset = (fr) => { const r = fr.getBoundingClientRect(), k = zoom(); return { x: r.left + fr.clientLeft * k, y: r.top + fr.clientTop * k, k }; };
+  function rectOf(el, fr) {  // an element (or a Range), in main px; fr: the app frame it is in (its px: main px)
+    const r = el.getBoundingClientRect(), o = fr ? frameOffset(fr) : { x: 0, y: 0, k: 1 }, p = inMain(o.x + r.left * o.k, o.y + r.top * o.k);
+    const s = fr ? 1 : 1 / zoom();  // window px -> main px
+    return { x: p.x, y: p.y, w: r.width * s, h: r.height * s };
   }
   const scopes = (el) => [{ root: el, fr: null }, ...[...(el.localName === "iframe" ? [el] : el.querySelectorAll("iframe"))].flatMap((fr) => {
     try { return fr.contentDocument?.body ? [{ root: fr.contentDocument.body, fr }] : []; } catch { return []; }  // other origins: not ours
@@ -671,7 +673,7 @@ export default async function (page) {
     if (under && !area.contains(under) && under !== document.documentElement && under !== document.body)
       return { box: { x, y, w, h }, board: Number(board()), fixed: true };
     const p = inMain(x, y);
-    return { box: { x: p.x, y: p.y, w, h }, board: Number(board()) };
+    return { box: { x: p.x, y: p.y, w: w / zoom(), h: h / zoom() }, board: Number(board()) };
   }
   function findMain(t, every) {
     if (t.mark) {

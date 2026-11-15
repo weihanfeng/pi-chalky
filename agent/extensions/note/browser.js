@@ -79,8 +79,13 @@ export default async function (page) {
     [...e.classList].slice(0, 2).map((c) => `.${c}`).join("");
 
   function inMain(x, y) {  // window px -> main-space px (the main space scrolls; card_show's place uses these)
-    const main = page.slot("top"), m = main.getBoundingClientRect();
-    return { x: Math.round(x - m.left + main.scrollLeft), y: Math.round(y - m.top + main.scrollTop) };
+    const main = page.slot("top"), m = main.getBoundingClientRect(), z = zoom();  // the board's zoom (board/browser.js)
+    return { x: Math.round((x - m.left) / z + main.scrollLeft), y: Math.round((y - m.top) / z + main.scrollTop) };
+  }
+  function zoom() { return parseFloat(page.slot("top").style.zoom) || 1; }  // window px per main px (and per app-frame px)
+  function inFrame(fr, x, y) {  // window px -> px in an app's frame (zoomed with the main space)
+    const r = fr.getBoundingClientRect(), z = zoom();
+    return [(x - r.left) / z - fr.clientLeft, (y - r.top) / z - fr.clientTop];
   }
 
   function target(x, y) {
@@ -89,9 +94,9 @@ export default async function (page) {
     let inner = null, frame = null, box = el.getBoundingClientRect();
     if (el.localName === "iframe") {  // look inside the frame (an App): same origin, so its document is readable
       try {
-        const r = el.getBoundingClientRect(), dx = r.left + el.clientLeft, dy = r.top + el.clientTop;
-        inner = el.contentDocument?.elementFromPoint(x - dx, y - dy);
-        if (inner) { frame = el; const b = inner.getBoundingClientRect(); box = new DOMRect(b.x + dx, b.y + dy, b.width, b.height); }
+        const r = el.getBoundingClientRect(), z = zoom(), dx = r.left + el.clientLeft * z, dy = r.top + el.clientTop * z;
+        inner = el.contentDocument?.elementFromPoint(...inFrame(el, x, y));
+        if (inner) { frame = el; const b = inner.getBoundingClientRect(); box = new DOMRect(dx + b.x * z, dy + b.y * z, b.width * z, b.height * z); }
       } catch {}
     }
     const hitEl = inner || el;
@@ -110,8 +115,7 @@ export default async function (page) {
     let part = null;  // what the thing itself says is at this spot (partAt), e.g. {"name": "enemy-2"}
     try {
       if (frame?.contentWindow?.partAt) {
-        const r = frame.getBoundingClientRect();
-        part = frame.contentWindow.partAt(x - r.left - frame.clientLeft, y - r.top - frame.clientTop);
+        part = frame.contentWindow.partAt(...inFrame(frame, x, y));
       } else {
         const owner = [hitEl, ...[...document.elementsFromPoint(x, y)]].find((e) => typeof e?.partAt === "function");
         if (owner) { const r = owner.getBoundingClientRect(); part = owner.partAt(x - r.left, y - r.top); }
@@ -188,8 +192,7 @@ export default async function (page) {
     const el = document.elementsFromPoint(x, y).find((e) => e !== layer && e !== ink);
     if (el?.localName === "iframe") {
       try {
-        const r = el.getBoundingClientRect(), dx = r.left + el.clientLeft, dy = r.top + el.clientTop;
-        if (typeof el.contentWindow.partIn === "function") return await el.contentWindow.partIn(points.map(([px, py]) => [px - dx, py - dy]));
+        if (typeof el.contentWindow.partIn === "function") return await el.contentWindow.partIn(points.map(([px, py]) => inFrame(el, px, py)));
       } catch (err) { console.warn("partIn:", err); }
     }
     const owner = document.elementsFromPoint(x, y).find((e) => typeof e.partIn === "function");
@@ -204,7 +207,7 @@ export default async function (page) {
     const left = Math.min(...xs), top = Math.min(...ys), width = Math.max(...xs) - left, height = Math.max(...ys) - top;
     if (width < 12 && height < 12) return openNote(target(e.clientX, e.clientY), e.clientX, e.clientY);
     const t = target(left + width / 2, top + height / 2);  // what is under the middle of the drawing
-    if (t) t.area = { ...inMain(left, top), width: Math.round(width), height: Math.round(height) };
+    if (t) t.area = { ...inMain(left, top), width: Math.round(width / zoom()), height: Math.round(height / zoom()) };
     const inside = t && (await partIn(left + width / 2, top + height / 2, points));
     if (inside) t.part = inside;
     openNote(t, e.clientX, e.clientY, points);

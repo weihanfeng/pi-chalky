@@ -15,15 +15,15 @@ const image = (src) => new Promise((ok, no) => Object.assign(new Image(), { onlo
 async function picture() {  // a PNG blob of the cards, or null if there are none
   const top = document.getElementById("top"), cards = [...top.querySelectorAll("[data-card]")];
   if (!cards.length) return null;
-  const domtoimage = await library(), at = top.getBoundingClientRect();
-  const box = (el) => { const r = el.getBoundingClientRect(); return { x: r.left - at.left + top.scrollLeft, y: r.top - at.top + top.scrollTop, w: r.width, h: r.height }; };
+  const domtoimage = await library(), at = top.getBoundingClientRect(), z = parseFloat(top.style.zoom) || 1;  // the board's zoom: drawn at 100%
+  const box = (el) => { const r = el.getBoundingClientRect(); return { x: (r.left - at.left) / z + top.scrollLeft, y: (r.top - at.top) / z + top.scrollTop, w: r.width / z, h: r.height / z }; };
   const all = cards.map(box);
   const x0 = Math.max(0, Math.min(...all.map((b) => b.x)) - MARGIN), y0 = Math.max(0, Math.min(...all.map((b) => b.y)) - MARGIN);
   const x1 = Math.max(...all.map((b) => b.x + b.w)) + MARGIN, y1 = Math.max(...all.map((b) => b.y + b.h)) + MARGIN;
   const width = Math.ceil(x1), height = Math.ceil(y1);  // the whole main space up to the last card; cropped below
   const bgcolor = getComputedStyle(document.body).backgroundColor;
   const page = await image(await domtoimage.toPng(top, { width, height, bgcolor,
-    style: { position: "static", inset: "auto", overflow: "visible", width: `${width}px`, height: `${height}px` } }));
+    style: { position: "static", inset: "auto", overflow: "visible", width: `${width}px`, height: `${height}px`, zoom: "1" } }));
   const canvas = Object.assign(document.createElement("canvas"), { width: Math.ceil(x1 - x0), height: Math.ceil(y1 - y0) });
   const g = canvas.getContext("2d");
   g.drawImage(page, -x0, -y0);

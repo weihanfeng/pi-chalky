@@ -325,6 +325,7 @@ export default async function (page) {
     const handle = e.currentTarget, box = s.box;
     handle.setPointerCapture(e.pointerId);  // keep getting moves over iframes and other cards
     let place = null, held = false, x0 = 0, y0 = 0;
+    const z = parseFloat(area.style.zoom) || 1;  // the board's zoom (board/browser.js): window px moved -> main px
     let under = null, armed = null, wait = null, sx = 0, sy = 0;  // the card under the pointer; armed: lit, ready to combine
     const hold = setTimeout(() => { held = true; page.send({ type: "card_pin", card: id, pinned: !s.pinned }); }, HOLD_MS);
     handle.onpointermove = (ev) => {
@@ -332,7 +333,7 @@ export default async function (page) {
       clearTimeout(hold);
       if (s.pinned || s.draggable === false) return;
       if (!place) { pinStacked(); x0 = box.offsetLeft; y0 = box.offsetTop; box.style.zIndex = 4; }  // offsets in the main space; above the rest while dragged
-      place = { ...s.place, x: Math.round(x0 + ev.clientX - e.clientX), y: Math.round(y0 + ev.clientY - e.clientY) };
+      place = { ...s.place, x: Math.round(x0 + (ev.clientX - e.clientX) / z), y: Math.round(y0 + (ev.clientY - e.clientY) / z) };
       box.toggleAttribute("data-placed", true);
       Object.assign(box.style, { position: "absolute", margin: "0", left: `${place.x}px`, top: `${place.y}px` });
       const now = cardAt(ev.clientX, ev.clientY, box);
@@ -366,12 +367,12 @@ export default async function (page) {
     if (s.pinned) return;
     pinStacked();
     const handle = e.currentTarget, box = s.box;
-    const x = box.offsetLeft, y = box.offsetTop, w0 = box.offsetWidth, h0 = box.offsetHeight;
+    const x = box.offsetLeft, y = box.offsetTop, w0 = box.offsetWidth, h0 = box.offsetHeight, z = parseFloat(area.style.zoom) || 1;
     handle.setPointerCapture(e.pointerId);
     let place = null;
     handle.onpointermove = (ev) => {
-      place = { x, y, width: Math.min(area.clientWidth - x, Math.max(40, Math.round(w0 + ev.clientX - e.clientX))),
-                height: Math.max(30, Math.round(h0 + ev.clientY - e.clientY)) };
+      place = { x, y, width: Math.min(area.clientWidth - x, Math.max(40, Math.round(w0 + (ev.clientX - e.clientX) / z))),
+                height: Math.max(30, Math.round(h0 + (ev.clientY - e.clientY) / z)) };
       box.toggleAttribute("data-placed", true);
       Object.assign(box.style, { position: "absolute", margin: "0", left: `${x}px`, top: `${y}px`,
                                  width: `${place.width}px`, height: `${place.height}px` });

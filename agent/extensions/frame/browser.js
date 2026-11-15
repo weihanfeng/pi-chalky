@@ -71,9 +71,10 @@ export default async function (page) {
   const board = () => Number(document.body.dataset.board) || 1;  // the board shown (board/): frames are drawn and sent there
   document.addEventListener("board", () => setTimeout(() => render(shown)));  // after the switch: count that board's
 
+  const zoom = () => parseFloat(area.style.zoom) || 1;  // the board's zoom (board/browser.js)
   const inMain = (x, y) => {  // window px -> main-space px (as note/browser.js)
-    const m = area.getBoundingClientRect();
-    return { x: Math.round(x - m.left + area.scrollLeft), y: Math.round(y - m.top + area.scrollTop) };
+    const m = area.getBoundingClientRect(), z = zoom();
+    return { x: Math.round((x - m.left) / z + area.scrollLeft), y: Math.round((y - m.top) / z + area.scrollTop) };
   };
   const put = (box, f) => Object.assign(box.style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.width}px`, height: `${f.height}px` });
 
@@ -154,8 +155,9 @@ export default async function (page) {
     const corner = e.currentTarget, x = box.offsetLeft, y = box.offsetTop, w0 = box.offsetWidth, h0 = box.offsetHeight;
     corner.setPointerCapture(e.pointerId);
     let place = null;
+    const z = zoom();  // window px moved -> main px
     corner.onpointermove = (ev) => {
-      place = { x, y, width: Math.max(40, Math.round(w0 + ev.clientX - e.clientX)), height: Math.max(30, Math.round(h0 + ev.clientY - e.clientY)) };
+      place = { x, y, width: Math.max(40, Math.round(w0 + (ev.clientX - e.clientX) / z)), height: Math.max(30, Math.round(h0 + (ev.clientY - e.clientY) / z)) };
       put(box, place);
     };
     corner.onpointerup = () => {
