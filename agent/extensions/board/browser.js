@@ -9,6 +9,8 @@
 // The shelf: a dot per board (yours is bigger). Hover it and the dots open into thumbnails, with + for a new board;
 // click one to go there. It stays clear of the chat panel: more thumbnails than fit scroll between ‹ and › (grey at
 // the ends; a new board scrolls to the end). Drag a card by its label onto a thumbnail to move it to that board, where it was ({type: "card_board"}).
+// Zoom: each board keeps its own (in this browser), as CSS zoom on #top, so places stay in main-space px; the control
+// at the bottom right (−, %, +, fit), or Ctrl/⌘ + wheel (a trackpad pinch). See setZoom below.
 //   page messages  board_view {board}: the board this page shows; board_add
 //   GET /board     {boards, current}        event "board" {boards, added?, by?}
 const CSS = `
@@ -61,7 +63,22 @@ const CSS = `
   .boards-shelf .slot.drop .mini { outline: 2px solid var(--accent); outline-offset: 1px; }
   .boards-shelf .add { display: none; width: 122px; height: 70px; border-radius: 6px;  /* a thumbnail's size, border included */ border: 1px dashed rgba(0, 0, 0, 0.25);
     color: var(--muted); font-size: 13px; align-self: flex-start; margin-top: 3px; }
-  .boards-shelf.open .add { display: block; }  /* only in the open shelf: at rest it's just the dots */`;
+  .boards-shelf.open .add { display: block; }  /* only in the open shelf: at rest it's just the dots */
+  /* zoom: CSS zoom on #top scales everything in the main space; its padding (room for the palette, rail, input) stays
+     the same on screen */
+  #top { padding: calc(var(--palette) / var(--zoom, 1)) calc((var(--rail) + 28px) / var(--zoom, 1))
+                  calc(var(--bar) / var(--zoom, 1)) calc((var(--rail) + 28px) / var(--zoom, 1)); }
+  .boards-zoom { position: fixed; right: 16px; bottom: 24px; z-index: 25; display: flex; align-items: center; gap: 2px; padding: 3px;
+    border-radius: 12px; background: var(--glass); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--edge); box-shadow: var(--shadow); font-size: 12px; color: var(--soft); }
+  .boards-zoom button { height: 26px; min-width: 26px; padding: 0 6px; border-radius: 8px; font-variant-numeric: tabular-nums; }
+  .boards-zoom button:hover { background: var(--hover); color: var(--text); }
+  .boards-zoom .pct { min-width: 46px; }
+  .boards-zoom .fit { font-size: 15px; }
+  /* the hand: drag the board to move around it; what is on it doesn't react meanwhile (apps' frames included) */
+  #top.panning { cursor: grab; }
+  #top.panning.grabbing { cursor: grabbing; }
+  #top.panning * { pointer-events: none !important; }`;
 
 export default async function (page) {
   document.head.insertAdjacentHTML("beforeend", `<style>${CSS}</style>`);
@@ -136,6 +153,129 @@ export default async function (page) {
       view.scrollLeft = s.offsetLeft - (view.clientWidth - s.offsetWidth) / 2;
   }
 
+  // ---- zoom: each board's own, kept in this browser (localStorage) ----
+  // CSS zoom on #top: places stay in main-space px (what cards, frames and marks store), and #top's scrollLeft/Top and
+  // clientWidth are in them too. Window px -> main px is (x - left) / zoom + scroll: the other extensions divide by
+  // #top's style.zoom where they turn the pointer into main px. Ctrl/⌘ + wheel (a trackpad pinch) zooms at the
+  // pointer; the control at the bottom right: −, the percentage (click: back to 100%), +, and fit (the whole board).
+  const MIN = 0.25, MAX = 2, KEY = "chalky.board-zoom";
+  const shot = new URLSearchParams(location.search).has("shot");  // the versions' headless view: always 100%
+  let zooms = {};
+  try { zooms = JSON.parse(localStorage.getItem(KEY)) || {}; } catch {}
+  const zoomOf = () => parseFloat(top.style.zoom) || 1;
+  function setZoom(z, at, save = true) {  // at: the window point that stays put (else the middle of the view)
+    z = shot ? 1 : Math.min(MAX, Math.max(MIN, Math.round(z * 100) / 100));
+    const m = top.getBoundingClientRect(), z0 = zoomOf();
+    at ??= { x: m.left + m.width / 2, y: m.top + m.height / 2 };
+    const p = { x: (at.x - m.left) / z0 + top.scrollLeft, y: (at.y - m.top) / z0 + top.scrollTop };  // in main px
+    top.style.zoom = z === 1 ? "" : z;
+    top.style.setProperty("--zoom", z);
+    if (z !== z0) { top.scrollLeft = p.x - (at.x - m.left) / z; top.scrollTop = p.y - (at.y - m.top) / z; }
+    pct.textContent = `${Math.round(z * 100)}%`;
+    if (save) {
+      if (z === 1) delete zooms[current]; else zooms[current] = z;
+      try { localStorage.setItem(KEY, JSON.stringify(zooms)); } catch {}
+    }
+  }
+  function fitZoom() {  // everything on this board in view
+    const els = [...container(current).children], z0 = zoomOf(), m = top.getBoundingClientRect();
+    if (!els.length) return setZoom(1);
+    const rs = els.map((el) => el.getBoundingClientRect()).filter((r) => r.width || r.height);
+    const main = (x, y) => ({ x: (x - m.left) / z0 + top.scrollLeft, y: (y - m.top) / z0 + top.scrollTop });
+    const a = main(Math.min(...rs.map((r) => r.left)), Math.min(...rs.map((r) => r.top)));
+    const b = main(Math.max(...rs.map((r) => r.right)), Math.max(...rs.map((r) => r.bottom)));
+    const s = getComputedStyle(document.documentElement), px = (v) => parseFloat(s.getPropertyValue(v)) || 0;
+    const side = px("--rail") + 28, w = innerWidth - 2 * side, h = innerHeight - px("--palette") - px("--bar");  // inside the padding
+    const z = Math.min(MAX, Math.max(MIN, Math.min(w / (b.x - a.x + 24), h / (b.y - a.y + 24), 1)));
+    setZoom(z);
+    top.scrollLeft = (a.x + b.x) / 2 - (m.width / 2) / z;
+    top.scrollTop = a.y - 12 - px("--palette") / z;
+  }
+  const zoomBar = Object.assign(document.createElement("div"), { className: "boards-zoom" });
+  zoomBar.dataset.name = "zoom";
+  const pct = button("pct", "100%", "Back to 100%", () => setZoom(1));
+  zoomBar.append(button("", "−", "Zoom out", () => setZoom(zoomOf() / 1.25)), pct,
+                 button("", "+", "Zoom in", () => setZoom(zoomOf() * 1.25)), button("fit", "⤢", "Fit the whole board", fitZoom));
+  document.body.append(zoomBar);
+  const pinch = (e, at) => {  // ctrl + wheel (a pinch on a trackpad sends that): zoom at the pointer, not the browser's
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    setZoom(zoomOf() * Math.exp(-e.deltaY * (e.deltaMode ? 0.05 : 0.01)), at);
+  };
+  // anywhere on the page, not only over the main space: over the messages panel (which lies over the board) a pinch
+  // would otherwise scroll the messages; captured, so nothing under the pointer scrolls with it
+  addEventListener("wheel", (e) => pinch(e, { x: e.clientX, y: e.clientY }), { passive: false, capture: true });
+  top.addEventListener("load", (e) => {  // an app's frame (same site): its pinches too, its px turned into window px
+    const fr = e.target;
+    if (fr.localName !== "iframe") return;
+    try {
+      fr.contentWindow.addEventListener("wheel", (ev) => {
+        const r = fr.getBoundingClientRect(), k = zoomOf();
+        pinch(ev, { x: r.left + fr.clientLeft * k + ev.clientX * k, y: r.top + fr.clientTop * k + ev.clientY * k });
+      }, { passive: false });
+    } catch {}  // another site's frame
+  }, true);
+
+  // ---- the hand: drag to move around the board (scrolls #top). The palette's hand tool (one tool at a time, Esc
+  // stops it); or hold Space (when not typing and no other tool is on); or drag with the middle button, any time.
+  // Two-finger scrolling on a trackpad moves around too (the browser's own scrolling).
+  const HAND = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12"/>` +
+    `<path d="M11 5.5v-2a1.5 1.5 0 1 1 3 0V12"/><path d="M14 5.5a1.5 1.5 0 0 1 3 0V12"/>` +
+    `<path d="M17 7.5a1.5 1.5 0 0 1 3 0V16a6 6 0 0 1-6 6h-2 .2a6 6 0 0 1-5-2.7l-.2-.3c-.3-.5-1.4-2.4-3.3-5.7a1.5 1.5 0 0 1 .5-2 1.9 1.9 0 0 1 2.3.3L8 13"/></svg>`;
+  const handButton = Object.assign(document.createElement("button"), { innerHTML: HAND,
+    title: "Hand: drag to move around the board (or hold Space, or drag with the middle button; Esc to stop)" });
+  handButton.dataset.name = "hand";
+  handButton.style.order = 99;  // the palette's last tool, at the right end, whichever script adds its tools after this one
+  page.slot("status").append(handButton);
+  let hand = false, spaceHand = false, panning = null;  // panning: {x, y, left, top} at the press
+  const panMode = () => top.classList.toggle("panning", hand || spaceHand || !!panning);
+  function setHand(v) {
+    hand = v;
+    handButton.classList.toggle("on", v);
+    panMode();
+    if (v) document.dispatchEvent(new CustomEvent("tool-on", { detail: "hand" }));  // the other tools turn off
+  }
+  handButton.onclick = () => setHand(!hand);
+  document.addEventListener("tool-on", (e) => { if (hand && e.detail !== "hand") setHand(false); });
+  const typing = () => document.activeElement?.matches?.("input, textarea, select, [contenteditable=''], [contenteditable='true']") ||
+    document.activeElement?.localName === "iframe";  // an app has the keys
+  const otherTool = () => !!document.querySelector("#status button.on:not([data-name='show-marks']):not([data-name='hand'])");
+  addEventListener("keydown", (e) => {
+    if (e.key === "Escape") setHand(false);
+    if (e.code !== "Space") return;
+    if (spaceHand) return e.preventDefault();  // held: its repeats don't scroll the page either
+    if (typing() || otherTool() || e.ctrlKey || e.metaKey || e.altKey) return;
+    e.preventDefault();  // not a page scroll, nor a click on the focused button
+    spaceHand = true;
+    panMode();
+  }, true);
+  addEventListener("keyup", (e) => { if (e.code === "Space" && spaceHand) { spaceHand = false; panMode(); } }, true);
+  addEventListener("blur", () => { spaceHand = false; panMode(); });
+  top.addEventListener("pointerdown", (e) => {
+    if (!(e.button === 1 || (e.button === 0 && (hand || spaceHand)))) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();  // not a click, a line or a frame on what is under it
+    panning = { x: e.clientX, y: e.clientY, left: top.scrollLeft, top: top.scrollTop, id: e.pointerId };
+    top.setPointerCapture(e.pointerId);
+    top.classList.add("grabbing");
+    panMode();
+  }, true);
+  top.addEventListener("pointermove", (e) => {
+    if (!panning || e.pointerId !== panning.id) return;
+    const z = zoomOf();  // window px moved -> main px scrolled, so the board stays under the pointer
+    top.scrollLeft = panning.left - (e.clientX - panning.x) / z;
+    top.scrollTop = panning.top - (e.clientY - panning.y) / z;
+  });
+  const stopPan = (e) => {
+    if (!panning || e.pointerId !== panning.id) return;
+    panning = null;
+    top.classList.remove("grabbing");
+    panMode();
+  };
+  top.addEventListener("pointerup", stopPan);
+  top.addEventListener("pointercancel", stopPan);
+  top.addEventListener("auxclick", (e) => { if (e.button === 1) e.preventDefault(); });  // the middle button doesn't open links
+
   const others = document.createElement("style");  // hides what is on the body for other boards (a note's pin)
   document.head.append(others);
   function show(n, tell = true) {  // go to board n (tell: the server, which the first show got it from)
@@ -145,6 +285,7 @@ export default async function (page) {
     document.body.dataset.board = n;
     others.textContent = `body > [data-board]:not([data-board="${n}"]) { display: none !important; }`;
     for (const b of boards) container(b).classList.toggle("on", b === n);
+    setZoom(zooms[n] ?? 1, null, false);  // each board keeps its own zoom (in this browser)
     if (tell) page.send({ type: "board_view", board: n });
     render();
   }

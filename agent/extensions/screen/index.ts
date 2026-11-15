@@ -4,8 +4,9 @@
 // (their size, scroll, panels, running apps; browser-check's headless Chrome is a fresh window of its own).
 //   POST /screen/shot       a png (at most MAX_BYTES): saved in data/screen, {path} back
 //   event "screen_ask"      {id, agent} to every open page, when an agent calls screen_see
-//   page message            screen_reply {id, shot, window: {width, height}, main: {x, y}}: the first answers
-//                           (shot null: the user said no; main: window (0, 0) in main-space px)
+//   page message            screen_reply {id, shot, window: {width, height}, main: {x, y}, zoom}: the first answers
+//                           (shot null: the user said no; main: window (0, 0) in main-space px; zoom: the board's,
+//                           window px per main-space px)
 //   event "screen_ask_done" {id} to every page when answered or after ASK_WAIT s, so the asks go away
 //   host.api.screen         isShot(path): whether a path is a picture saved here (others attach pictures by path)
 import fs from "node:fs";
@@ -70,11 +71,12 @@ export default function (pi: ExtensionAPI) {
       if (!reply) return result(`no answer within ${ASK_WAIT} s (the page may not be open, or the user is away): ask them what they see`);
       if (!isShot(reply.shot)) return result("the user didn't share their screen: ask them what they see");
       const png = fs.readFileSync(reply.shot), pw = png.readUInt32BE(16), ph = png.readUInt32BE(20);  // the png's own size (IHDR)
-      const w = reply.window ?? {}, m = reply.main ?? {}, k = w.width ? pw / w.width : 1;
+      const w = reply.window ?? {}, m = reply.main ?? {}, z = Number(reply.zoom) || 1, k = (w.width ? pw / w.width : 1) * z;  // picture px per main px
       const mx = Math.round(m.x ?? 0), my = Math.round(m.y ?? 0);
       return result(`the user's screen right now: their window is ${w.width}x${w.height} px; the picture is the whole window, `
-        + `${pw}x${ph} px (${+k.toFixed(3)} picture px per window px). Window (0, 0) is main-space (${mx}, ${my}): a spot in `
-        + `the picture is main-space x = ${mx} + picture x / ${+k.toFixed(3)}, the same for y (what card_show's place uses).`, reply.shot);
+        + `${pw}x${ph} px${z !== 1 ? `, with the board zoomed to ${Math.round(z * 100)}%` : ""} (${+k.toFixed(3)} picture px per main-space px). `
+        + `Window (0, 0) is main-space (${mx}, ${my}): a spot in the picture is main-space x = ${mx} + picture x / ${+k.toFixed(3)}, `
+        + `the same for y (what card_show's place uses).`, reply.shot);
     },
   });
 }

@@ -49,9 +49,9 @@ export default async function (page) {
     await new Promise((ok) => setTimeout(ok, 400));         // it has slid away; a fresh frame from the shared tab
     const full = frame();
     const s = full && await picture(full, { x: 0, y: 0, w: innerWidth, h: innerHeight }).catch(() => null);
-    const m = area.getBoundingClientRect();  // window (0, 0) in main-space px (as note/browser.js)
+    const m = area.getBoundingClientRect(), zoom = parseFloat(area.style.zoom) || 1;  // window (0, 0) in main-space px (as note/browser.js)
     page.send({ type: "screen_reply", id, shot: s?.path || null, window: { width: innerWidth, height: innerHeight },
-                main: { x: area.scrollLeft - m.left, y: area.scrollTop - m.top } });
+                main: { x: area.scrollLeft - m.left / zoom, y: area.scrollTop - m.top / zoom }, zoom });
   }
   page.on("screen_ask", ({ id, agent }) => {
     if (shared()) return answer(id);
