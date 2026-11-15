@@ -3,6 +3,7 @@
 // A card is bare: only what the agent built, no frame (its label shows on hover: name, owner, ✕). It is
 // stacked in the main space, its content keeping its own size; or pinned at place {x, y, width?, height?}
 // (px from the main space's top-left, so it scrolls with the page), its root block then filling it.
+// (a new card with no place gets one near the middle of the view: autoPlace)
 // What the user can do with the label (the handle, so clicks inside still work):
 //   drag          move it; a drop sends {type: "card_move", card, place} (unless draggable: false)
 //   drag and hold still over another card (it lights up), release   combine: it slides back and the page
@@ -287,11 +288,11 @@ export default async function (page) {
 
   page.on("card", (ev) => {
     if (ev.op === "render") {
-      const old = cards[ev.card] || {};
+      const isNew = !cards[ev.card], old = cards[ev.card] || {};
       const { op, type, card, ...record } = ev;
       cards[ev.card] = { ...record, box: old.box, label: old.label, body: old.body, nodes: old.nodes, frame: old.frame,
                                flipped: old.flipped, option: record.options ? old.option : 0 };
-      draw(ev.card);
+      draw(ev.card).then(() => { if (isNew && !record.place) autoPlace(ev.card); });
     } else if (ev.op === "delete" && cards[ev.card]) {
       cards[ev.card].box?.remove();
       delete cards[ev.card];
@@ -305,6 +306,47 @@ export default async function (page) {
       for (const id of Object.keys(cards)) draw(id);
     }
   });
+
+  // A new card the agent gave no place: near the middle of what the user sees (between the panel, if open, and the
+  // right edge; below the palette, above the input bar), clear of everything else on the board. The nearest free
+  // spot to the middle, on a 40 px grid, keeping a 24 px gap. Only the tab in view, and only on the board shown
+  // (a card for another board stays stacked). Sent as card_place: saved, with no step of its own in the history.
+  const GAP = 24, STEP = 40, RINGS = 60;
+  async function autoPlace(id) {
+    const s = cards[id];
+    if (!s?.box || s.place || document.visibilityState !== "visible") return;
+    if ((Number(s.board) || 1) !== (Number(document.body.dataset.board) || 1)) return;
+    await new Promise(requestAnimationFrame);  // its blocks drawn
+    if (s.place) return;
+    const box = s.box;
+    box.toggleAttribute("data-placed", true);  // its size as a placed card, off the stack
+    Object.assign(box.style, { position: "absolute", margin: "0", left: "0px", top: "0px", visibility: "hidden" });
+    const z = parseFloat(area.style.zoom) || 1, w = box.offsetWidth, h = box.offsetHeight;
+    const m = area.getBoundingClientRect();
+    const main = (x, y) => ({ x: (x - m.left) / z + area.scrollLeft, y: (y - m.top) / z + area.scrollTop });
+    const css = getComputedStyle(document.documentElement), px = (v) => parseFloat(css.getPropertyValue(v)) || 0;
+    const panel = document.getElementById("panel"), open = ["messages", "versions"].includes(document.body.dataset.panel);
+    const side = px("--rail") + 28;
+    const a = main(Math.max(side, open && panel ? panel.getBoundingClientRect().right : 0), px("--palette"));
+    const b = main(innerWidth - side, innerHeight - px("--bar"));
+    const cx = (a.x + b.x) / 2 - w / 2, cy = (a.y + b.y) / 2 - h / 2;
+    const others = [...(box.parentElement?.children ?? [])].filter((el) => el !== box).map((el) => el.getBoundingClientRect())
+      .filter((r) => r.width && r.height).map((r) => ({ ...main(r.left, r.top), w: r.width / z, h: r.height / z }));
+    const free = (x, y) => others.every((o) => x + w + GAP <= o.x || o.x + o.w + GAP <= x || y + h + GAP <= o.y || o.y + o.h + GAP <= y);
+    const spots = [];
+    for (let i = -RINGS; i <= RINGS; i++) for (let j = -RINGS; j <= RINGS; j++) {
+      const x = Math.round(cx + i * STEP), y = Math.round(cy + j * STEP);
+      if (x >= 0 && y >= 0) spots.push({ x, y, d: (i * i + j * j) });
+    }
+    spots.sort((p, q) => p.d - q.d);
+    const spot = spots.find((p) => free(p.x, p.y)) ?? { x: Math.max(0, Math.round(cx)), y: Math.max(0, Math.round(cy)) };
+    // an app keeps its width: a placed box with none shrinks to the room left of the window's edge, and in a narrower
+    // window (the card_show check's browser) an app far right would be 0px wide
+    s.place = s.app ? { x: spot.x, y: spot.y, width: w } : { x: spot.x, y: spot.y };
+    Object.assign(box.style, { left: `${spot.x}px`, top: `${spot.y}px`, visibility: "" });
+    if (s.app) { box.style.width = `${w}px`; s.frame && (s.frame.style.width = "100%"); }
+    page.send({ type: "card_place", card: id, place: s.place });
+  }
 
   function pinStacked() {  // pin each stacked card where it is now, so taking one out of the stack moves none
     const stacked = Object.entries(cards).filter(([, s]) => !s.place && s.box);
