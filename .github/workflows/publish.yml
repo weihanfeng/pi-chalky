@@ -48,6 +48,19 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: npm version "$VERSION" --no-git-tag-version --allow-same-version
 
+      # Install from the lockfile so bundleDependencies (xlsx) are in node_modules when npm packs:
+      # without it they're silently left out of the tarball and npm never fetches them on install.
+      - run: npm ci
+
+      - name: Check the bundled dependencies are packed
+        run: |
+          for dep in $(node -p 'require("./package.json").bundleDependencies.join(" ")'); do
+            npm pack --dry-run --json | node -e '
+              const files = JSON.parse(require("fs").readFileSync(0, "utf8"))[0].files.map((f) => f.path);
+              if (!files.some((p) => p.startsWith(`node_modules/${process.argv[1]}/`))) { console.log(`::error::${process.argv[1]} is not in the package`); process.exit(1); }
+            ' "$dep"
+          done
+
       - name: Publish
         run: npm publish
 
