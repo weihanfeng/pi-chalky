@@ -29,7 +29,7 @@ You name the thing; the page draws it by hand in your colour, and keeps it on th
   page (the mark goes on just those characters), element a CSS selector or an element's id or data-name (also inside
   an app's frame), mark one of the marks (theirs or yours: m7). Example: {"card": "shop", "text": "12.50"}.
 - The page's own controls can be marked too, by name: {element: "pen"} (the marker), "text", "eraser", "show-marks"
-  (the eye), "note" (the note pencil), "frames", "files", "dictate" (the mic), "tools" (the whole palette, top centre),
+  (the eye), "note" (the speech bubble), "frames", "files", "dictate" (the mic), "tools" (the whole palette, top centre),
   "rail" (left edge), "messages", "versions", "message-line" (bottom), "boards" (the shelf above it), "new-board". Such
   marks stay fixed to the window. Good for a tour: ring "pen" with "draw here".
 - at: {x, y, width, height} in window px, as screen_see's picture shows it: a last resort for something with no name

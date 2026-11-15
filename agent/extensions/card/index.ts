@@ -16,7 +16,7 @@
 //   GET /card/all           every card                   GET /card/about   block name -> its about block
 //   GET /card/blocks        block name -> mtime          GET /card/blocks/<Name>.js, /card/node_modules/{marked,dompurify}/...
 //   GET /card/lib/...       libraries the agents added for blocks (lib/ here: ES-module builds)
-//   page messages           card_set, card_prop, card_move, card_board, card_pin, card_keep, card_close, card_action
+//   page messages           card_set, card_prop, card_move, card_place, card_board, card_pin, card_keep, card_close, card_action
 //   page event "card"       {op: "render", card, ...record} | {op: "delete", card} | {op: "reset", cards}
 import fs from "node:fs";
 import path from "node:path";
@@ -344,6 +344,9 @@ export default function (pi: ExtensionAPI) {
     else if (type === "card_move") {
       if (r.pinned) return host.broadcast("card", { op: "render", card: id, ...r });
       r.place = msg.place; cards.change(id, r, "user", `moved ${id}`);
+    } else if (type === "card_place") {  // the page put a new card with no place near the middle of the view: not a move
+      if (r.place || r.pinned) return;   // the user saw it appear there, so no step of its own (it is part of the showing)
+      r.place = msg.place; cards.change(id, r);
     } else if (type === "card_board" && host.api.board?.has(msg.board)) {  // dropped on another board's thumbnail
       if (r.pinned) return host.broadcast("card", { op: "render", card: id, ...r });
       r.board = msg.board; r.place = msg.place ?? null; cards.change(id, r, "user", `moved ${id} to board ${msg.board}`);
