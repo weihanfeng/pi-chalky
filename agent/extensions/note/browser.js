@@ -1,5 +1,5 @@
-// The page side of the note extension. A pencil button in the tool palette (top) turns on a clear
-// layer over the page; the cursor is a pen, blue over something a click would point at.
+// The page side of the note extension. A speech-bubble button in the tool palette (top) turns on a clear
+// layer over the page; the cursor is a speech bubble, blue over something a click would point at.
 //   Click: a note box opens there.  Hold the button and draw: on release the note box opens, and the note
 //   covers the drawn area (its bounding box, in main-space px: where card_show's place puts a card).
 // The user sees only the box; the target goes to the agent with the note: card and block (from
@@ -28,11 +28,11 @@ export default async function (page) {
 
   const layer = document.createElement("div");  // catches clicks, so the page underneath doesn't react
   layer.style.cssText = "position:fixed;inset:0;z-index:9998;display:none";
-  // The cursor: the button's pen (white edge, so it shows on dark too), its tip (4, 20) is the spot pointed at.
+  // The cursor: the button's speech bubble (white edge, so it shows on dark too); its tail's tip (2, 22) is the spot pointed at.
+  const BUBBLE = "M7.9 20A9 9 0 1 0 4 16.1L2 22z";
   const pen = (color) => `url("data:image/svg+xml,${encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">` +
-    `<g stroke="#fff" stroke-width="4"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13 7 4 4"/></g>` +
-    `<g stroke="${color}" stroke-width="2"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13 7 4 4"/></g></svg>`)}") 4 20, crosshair`;
+    `<path d="${BUBBLE}" stroke="#fff" stroke-width="4"/><path d="${BUBBLE}" stroke="${color}" stroke-width="2"/></svg>`)}") 2 22, crosshair`;
   const PEN = pen("#6e6e73"), PEN_ON = pen("#0071e3");  // grey: empty space; blue: over a thing
   layer.style.cursor = PEN;
   const input = document.createElement("input");  // the note box, opened where the user clicked
@@ -60,7 +60,7 @@ export default async function (page) {
   document.body.append(layer, ink, input);
 
   const button = document.createElement("button");
-  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13 7 4 4"/></svg>`;
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${BUBBLE}"/></svg>`;  // a speech bubble
   button.title = "Point: click anything, or hold and draw around an area, then write a note (Esc to stop)";
   button.dataset.name = "note";  // names an agent's pen can point at
   page.slot("status").prepend(button);  // the first tool in the palette, whichever script loads first
