@@ -21,6 +21,7 @@
 //                       callback came first) | {step: "done", provider} | {step: "cancelled"} | {step: "error", text} | {step: "models", models}
 //                       (model_probe's answer) | {step: "changed"} (a login, endpoint or model changed: agents are synced)
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { ModelRuntime, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -34,6 +35,23 @@ const APIS = ["openai-completions", "openai-responses", "anthropic-messages", "g
 if (!host.shared.has("model-runtime"))
   host.shared.set("model-runtime", ModelRuntime.create({ authPath: path.join(host.agent, "auth.json"), modelsPath: MODELS }));
 const runtime = (): Promise<ModelRuntime> => host.shared.get("model-runtime");
+
+// The page a sign-in's browser tab lands on is pi's (its callback server, in this process), with pi's logo: put
+// Chalky's mark (a chalkboard) in its place. pi has no option for it, so the page is changed on its way out: only
+// a body with pi's logo in its "logo" box (the sign-in pages), the rest of pi's page is kept as it is. Once per process.
+const MARK = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke-linecap="round">` +
+  `<rect x="2" y="4" width="20" height="14" rx="2.5" fill="#2f4f45"/>` +
+  `<path d="M6 12.5c1.3-2.6 2.7-2.6 4 0s2.7 2.6 4 0 2.7-2.6 4 0" stroke="#fff" stroke-width="1.6"/>` +
+  `<path d="M9 21h6" stroke="#a1a1aa" stroke-width="1.6"/></svg>`;
+if (!host.shared.has("model-page")) {
+  host.shared.set("model-page", true);
+  const end = http.ServerResponse.prototype.end as any;
+  http.ServerResponse.prototype.end = function (this: any, chunk: any, ...rest: any[]) {
+    if (typeof chunk === "string" && chunk.includes('<div class="logo"><svg') && chunk.includes("#F09082"))
+      chunk = chunk.replace(/<div class="logo"><svg[\s\S]*?<\/svg><\/div>/, `<div class="logo">${MARK}</div>`);
+    return end.call(this, chunk, ...rest);
+  } as any;
+}
 
 const readModels = () => (fs.existsSync(MODELS) ? JSON.parse(fs.readFileSync(MODELS, "utf8")) : { providers: {} });
 const readState = () => (fs.existsSync(STATE) ? JSON.parse(fs.readFileSync(STATE, "utf8")) : {});
