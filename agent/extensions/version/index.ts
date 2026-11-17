@@ -12,13 +12,13 @@
 //   - Pictures for the panel: taken by the open page itself (browser.js here, with dom-to-image-more; no
 //     headless browser), after each new version and, when a page opens, for the current version if it has none.
 //     In data/version/shots/<sha>.png. A version made while no page was open and changed again before one opened: none.
-//   - GET  /version                  the user's versions, newest first ({sha, short, author, date, message, current, shot}):
+//   - GET  /versions                 the user's versions, newest first ({sha, short, author, date, message, current, shot}):
 //                                    host.history.versions(), so not the releases an update merged in
-//     GET  /version/update          this start's update of Chalky (server.ts's host.update), to the first page that
+//     GET  /versions/update         this start's update of Chalky (server.ts's host.update), to the first page that
 //                                    asks (browser.js: a notice); later: null. {release, files, conflicts} or {release, error}
-//     GET  /version/<sha>/shot      that commit's picture (404 if none; HEAD too)
-//     PUT  /version/<sha>/shot      the page's picture (PNG, at most 10 MB; {saved: false} if it has one: the first page wins)
-//     POST /version/<sha>/rollback  that commit's files as a NEW commit (history is never rewritten, so a rollback
+//     GET  /versions/<sha>/shot     that commit's picture (404 if none; HEAD too)
+//     PUT  /versions/<sha>/shot     the page's picture (PNG, at most 10 MB; {saved: false} if it has one: the first page wins)
+//     POST /versions/<sha>/rollback that commit's files as a NEW commit (history is never rewritten, so a rollback
 //                                    can be rolled back). The Python agent restarted its process; here: stop every
 //                                    agent, put the files back, reload every agent's extensions (pi's reload), read
 //                                    the cards again, and tell each agent (an fyi: no turn).
@@ -131,12 +131,12 @@ export default function (pi: ExtensionAPI) {
     });
   });
 
-  host.routes.set("/version/update", (_req: any, res: any) => {
+  host.routes.set("/versions/update", (_req: any, res: any) => {
     const u = host.update && !host.update.told ? host.update : null;
     if (u) u.told = true;
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(u));
   });
-  host.routes.set("/version", async (_req: any, res: any) => {
+  host.routes.set("/versions", async (_req: any, res: any) => {
     const now = await head();  // waits for queued work, so the log is complete
     const out = (await versions()).map(({ oid, commit: c }) => ({ sha: oid, short: oid.slice(0, 7), author: c.author.name,
       date: new Date(c.author.timestamp * 1000).toISOString(), message: c.message.split("\n")[0], current: oid === now,
@@ -144,7 +144,7 @@ export default function (pi: ExtensionAPI) {
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(out));
   });
 
-  host.routes.set("/version/", async (req: any, res: any) => {  // /version/<sha>/shot, /version/<sha>/rollback
+  host.routes.set("/versions/", async (req: any, res: any) => {  // /versions/<sha>/shot, /versions/<sha>/rollback
     const [, , given, what] = new URL(req.url, "http://x").pathname.split("/");
     if (!/^[0-9a-f]{7,40}$/.test(given ?? "")) return res.writeHead(400).end();
     let sha: string;
@@ -193,13 +193,13 @@ export default function (pi: ExtensionAPI) {
     if (files.includes("built/card.json")) { host.shared.get("card")?.load(); host.api.history?.add("user", `rolled back to ${subject}`); }
     for (const name of host.agents.keys())
       host.api.team?.fyi("system", name, `The user rolled ${host.agent} and ${host.built} back to version ${subject}. Later changes are undone `
-        + `(still in the history: GET http://127.0.0.1:${host.port}/version). Check before relying on them.`);
+        + `(still in the history: GET http://127.0.0.1:${host.port}/versions). Check before relying on them.`);
     const now = await head();
     host.broadcast("version", { agent: "user", sha: now.slice(0, 7), message: `rollback to ${subject}`, files, restart: false });
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true }));
   });
 
-  host.routes.set("/version/dom-to-image-more.js", (_req: any, res: any) =>
+  host.routes.set("/versions/dom-to-image-more.js", (_req: any, res: any) =>
     res.writeHead(200, { "content-type": "text/javascript" })
       .end(fs.readFileSync(path.join(host.modules, "dom-to-image-more/dist/dom-to-image-more.min.js"))));
 }

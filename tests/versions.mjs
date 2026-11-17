@@ -94,9 +94,9 @@ async function turn(agent, ask, steps, { wait = 0 } = {}) {
 }
 const write = (rel, content) => ({ name: "write", args: { path: path.join(HOME, rel), content } });
 const bash = (command) => ({ name: "bash", args: { command: `cd '${HOME}' && ${command}` } });
-const versions = async () => (await fetch(`${URL}/version`)).json();  // also waits for the history's queued work
+const versions = async () => (await fetch(`${URL}/versions`)).json();  // also waits for the history's queued work
 const top = async () => (await versions())[0];
-const rollback = (sha) => fetch(`${URL}/version/${sha}/rollback`, { method: "POST" }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
+const rollback = (sha) => fetch(`${URL}/versions/${sha}/rollback`, { method: "POST" }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
 const repo = { fs, dir: HOME, gitdir: path.join(HOME, "data/version/git") };
 const filesIn = async (sha) => {  // what a version changed, compared with its first parent
   const c = (await git.readCommit({ ...repo, oid: sha })).commit, out = [];
@@ -230,7 +230,7 @@ res = await fetch(`${URL}/recover/${CARD}`, { method: "POST", redirect: "manual"
 eq([res.status, (await (await fetch(`${URL}/card/all`)).json()).c1 ? "c1" : null], [303, "c1"], "recover forward to the card");
 res = await fetch(`${URL}/recover/0000000`, { method: "POST", redirect: "manual" });
 eq(res.status, 404, "an unknown version: 404");
-r = await fetch(`${URL}/version/zzz/rollback`, { method: "POST" });
+r = await fetch(`${URL}/versions/zzz/rollback`, { method: "POST" });
 eq(r.status, 400, "a malformed version: 400");
 
 console.log("\n11. labels: what changed, in words");

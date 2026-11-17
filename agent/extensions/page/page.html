@@ -615,7 +615,7 @@
   };
 
   async function loadVersions() {
-    try { versions = await (await fetch("/version")).json(); } catch { return; }  // no versions plugin
+    try { versions = await (await fetch("/versions")).json(); } catch { return; }  // no versions plugin
     sel = Math.max(0, versions.findIndex((v) => v.current));
     renderWheel();
   }
@@ -640,7 +640,7 @@
     detail.textContent = `${v.short} · ${v.author} · ${new Date(v.date).toLocaleString()}` + (v.current ? " · current" : "");
     rollbackBtn.disabled = v.current;
     preview.hidden = !v.shot;  // a version made while no page was open has no picture
-    if (v.shot) preview.src = `/version/${v.sha}/shot`;
+    if (v.shot) preview.src = `/versions/${v.sha}/shot`;
   }
 
   function select(i) {
@@ -655,7 +655,7 @@
     if (!confirm(`Roll back to "${v.message}" (${v.short})?\n\nThe agent restarts and busy agents are interrupted. ` +
                  `Later changes stay in the history, so you can roll forward again.`)) return;
     note(`rolling back to ${v.short}…`);
-    await fetch(`/version/${v.sha}/rollback`, { method: "POST" });
+    await fetch(`/versions/${v.sha}/rollback`, { method: "POST" });
   };
 
   openPanel(SHOT ? "" : document.body.dataset.panel);

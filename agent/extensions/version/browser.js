@@ -1,13 +1,13 @@
 // Pictures for the Versions panel, taken by the open page itself (no headless browser): after a new version (the
 // "version" event), and when the page opens and the current version has none yet. It draws the main space (#top)
 // with dom-to-image-more, then each same-site app frame's own page pasted in place (the library leaves frames
-// blank), crops to the cards plus a margin, and uploads it: PUT /version/<sha>/shot (the first page wins).
+// blank), crops to the cards plus a margin, and uploads it: PUT /versions/<sha>/shot (the first page wins).
 // Can't be drawn: video, and pictures or frames from other sites (those parts stay blank).
-// Also: when Chalky was updated at this start (GET /version/update), a notice says what changed or why it couldn't.
+// Also: when Chalky was updated at this start (GET /versions/update), a notice says what changed or why it couldn't.
 const MARGIN = 32;
 let lib;
 const library = () => lib ??= new Promise((ok, no) => {  // loaded once, on the first picture
-  const s = Object.assign(document.createElement("script"), { src: "/version/dom-to-image-more.js", onload: () => ok(window.domtoimage), onerror: no });
+  const s = Object.assign(document.createElement("script"), { src: "/versions/dom-to-image-more.js", onload: () => ok(window.domtoimage), onerror: no });
   document.head.append(s);
 });
 const image = (src) => new Promise((ok, no) => Object.assign(new Image(), { onload() { ok(this); }, onerror: no, src }));
@@ -45,14 +45,14 @@ let busy = Promise.resolve();
 function shoot(sha) {  // one picture at a time
   busy = busy.then(async () => {
     const png = await picture();
-    if (png) await fetch(`/version/${sha}/shot`, { method: "PUT", body: png });
+    if (png) await fetch(`/versions/${sha}/shot`, { method: "PUT", body: png });
   }).catch((e) => console.warn("versions: no picture", e));
 }
 
 export default async function (page) {
   if (new URLSearchParams(location.search).has("shot")) return;  // the old headless view
   page.on("version", (ev) => setTimeout(() => shoot(ev.sha), 2000));  // after the page has redrawn what changed
-  fetch("/version/update").then((r) => r.json()).then((u) => {
+  fetch("/versions/update").then((r) => r.json()).then((u) => {
     if (!u) return;
     const kept = u.conflicts?.length;
     page.notice(u.error ? [`Chalky couldn't update to ${u.release}, so it runs as before. ${u.error}`]
@@ -61,7 +61,7 @@ export default async function (page) {
         + " To undo it, go back a version in Versions."]);
   }).catch(() => {});
   try {  // the current version has no picture yet (made while no page was open): take it now
-    const current = (await (await fetch("/version")).json()).find((v) => v.current);
+    const current = (await (await fetch("/versions")).json()).find((v) => v.current);
     if (current && !current.shot) setTimeout(() => shoot(current.short), 3000);  // once the cards are drawn
   } catch {}
 }

@@ -241,10 +241,10 @@ try {
   check(/thinking/.test(th?.text ?? ""), "the /thinking command answers", JSON.stringify(th));
   check((await get("/voice/config")).body.api === false, "/voice/config (no speech-to-text API set)");
   check((await req("POST", "/voice/transcribe", "x")).status >= 400, "/voice/transcribe refuses without an API");
-  const versions = (await get("/version")).body;
-  check(Array.isArray(versions) && versions.length >= 1 && versions.at(-1).message === "original", "GET /version (the history began as original)");
-  const put = (await req("PUT", `/version/${versions[0].sha}/shot`, PNG)).body;  // saved: false when the page took it first
-  check(typeof put.saved === "boolean" && (await get(`/version/${versions[0].short}/shot`)).status === 200, "a version's picture: PUT (first page wins), GET");
+  const versions = (await get("/versions")).body;
+  check(Array.isArray(versions) && versions.length >= 1 && versions.at(-1).message === "original", "GET /versions (the history began as original)");
+  const put = (await req("PUT", `/versions/${versions[0].sha}/shot`, PNG)).body;  // saved: false when the page took it first
+  check(typeof put.saved === "boolean" && (await get(`/versions/${versions[0].short}/shot`)).status === 200, "a version's picture: PUT (first page wins), GET");
   const shot = await req("POST", "/screen/shot", PNG);
   check(shot.status === 200 && fs.existsSync(shot.body.path ?? ""), "POST /screen/shot");
 
@@ -254,7 +254,7 @@ try {
     const names = t.calls.map((c) => c.name);
     check(!t.timedOut && names.includes("board_list") && names.includes("card_show") && names.includes("card_update"), "board_list, card_show, card_update", names.join(","));
     check(JSON.stringify((await cards()).m1?.blocks ?? []).includes("pong"), "the card says pong");
-    check((await get("/version")).body.length > versions.length, "the turn made a version");
+    check((await get("/versions")).body.length > versions.length, "the turn made a version");
 
     section("agents: team");
     t = await turn({ to: "main", text: "Test, keep it short. Add one helper with team_spawn (role: checker). Use team_ask to ask it to reply with just yes. Then call team_list. Then team_reset it." });
@@ -292,13 +292,13 @@ try {
 
     section("agents: changing itself, reload, rollback");
     const guide = path.join(HOME, "agent/extensions/board/guide.md"), before = fs.readFileSync(guide, "utf8");
-    const v0 = (await get("/version")).body[0];
+    const v0 = (await get("/versions")).body[0];
     t = await turn({ to: "main", text: `Test: append the line "- e2e marker." to ${guide}, then call the reload tool with reason "e2e marker".` });
     check(fs.readFileSync(guide, "utf8").includes("e2e marker") && t.calls.some((c) => c.name === "reload"), "an agent edits itself and calls reload");
     check(t.events.some((e) => e.type === "error" && /extensions reloaded/.test(e.text)), "its extensions load again after the turn");
-    const v1 = (await get("/version")).body[0];
+    const v1 = (await get("/versions")).body[0];
     check(v1.message === "e2e marker", "the version's message is the reload reason", v1.message);
-    const rb = await req("POST", `/version/${v0.short}/rollback`);
+    const rb = await req("POST", `/versions/${v0.short}/rollback`);
     check(rb.body.ok === true && fs.readFileSync(guide, "utf8") === before, "rollback puts the guide back");
 
     section("agents: stop");

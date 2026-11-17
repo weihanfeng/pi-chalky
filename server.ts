@@ -482,7 +482,7 @@ async function recover(sha: string, res: http.ServerResponse) {
   if (files.includes("built/card.json")) { host.shared.get("card")?.load?.(); host.api.history?.add("user", `recovered to ${subject}`); }
   for (const name of host.agents.keys())
     host.api.team?.fyi("system", name, `The user recovered ${AGENT} and ${BUILT} to version ${subject} (the page was broken). `
-      + `Later changes are undone (still in the history: GET http://127.0.0.1:${PORT}/version). Check before relying on them.`);
+      + `Later changes are undone (still in the history: GET http://127.0.0.1:${PORT}/versions). Check before relying on them.`);
   console.log(`recovered to ${subject}`);
   res.writeHead(303, { location: "/" }).end();
 }

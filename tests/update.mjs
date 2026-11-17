@@ -118,7 +118,7 @@ async function start(rel, h, { keep = false, ask = true, env = {} } = {}) {
   const exited = new Promise((r) => p.on("exit", () => { servers.delete(p); r(); }));
   for (let i = 0; i < 120 && !/chalky \(pi\) on/.test(read(log)) && p.exitCode === null; i++) await new Promise((r) => setTimeout(r, 250));
   const up = /chalky \(pi\) on/.test(read(log));
-  const update = up && ask ? await fetch(`http://127.0.0.1:${PORT}/version/update`).then((r) => r.ok ? r.json() : "no route") : undefined;
+  const update = up && ask ? await fetch(`http://127.0.0.1:${PORT}/versions/update`).then((r) => r.ok ? r.json() : "no route") : undefined;
   const stop = async () => { p.kill(); await exited; };
   if (!keep) await stop();
   return { up, update, log: read(log), stop };
@@ -154,7 +154,7 @@ const message = (h) => {  // agent1's session: the update's message from chalky,
 const gitdirStray = (h) => fs.readdirSync(`${h}/data/version/git`).filter((f) => !["HEAD", "config", "description", "index", "objects", "refs", "hooks", "info", "logs", "packed-refs", "ORIG_HEAD", "MERGE_HEAD"].includes(f));
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 async function listed() {  // what the running server lists: the version panel's GET /version, and /recover's rows
-  const panel = (await (await fetch(`http://127.0.0.1:${PORT}/version`)).json()).map((v) => v.message);
+  const panel = (await (await fetch(`http://127.0.0.1:${PORT}/versions`)).json()).map((v) => v.message);
   const recover = [...(await (await fetch(`http://127.0.0.1:${PORT}/recover`)).text()).matchAll(/<tr><td>[^<]*<\/td>\s*<td>[^<]*<\/td><td>([^<]*)<\/td>/g)].map((m) => m[1]);
   return { panel, recover };
 }
@@ -221,7 +221,7 @@ const H3 = home("all cases");
     check(/Updated to Chalky 9\.0\.1: \d+ files changed\. 4 kept your change; agent1 is merging the update into them\. To undo it, go back a version in Versions\./.test(notice),
       "the page shows the notice", notice || "(no notice in the page)");
   } else console.log("  (skipped: the notice on the page; set CHROME to a headless Chrome)");
-  const u = await (await fetch(`http://127.0.0.1:${PORT}/version/update`)).json();
+  const u = await (await fetch(`http://127.0.0.1:${PORT}/versions/update`)).json();
   if (CHROME) eq(u, null, "the notice is given once (the page took it)");
   await wait(1500);  // agent1 gets its message
   await s.stop();
@@ -337,7 +337,7 @@ console.log("9. going back from an update in the version panel, then the next re
   append(`${h}/agent/SYSTEM.md`, "Use British spelling.\n");
   const s = await start(R2, h, { keep: true });
   const before = (await git.log({ ...repo(h), ref: "main" }))[0].commit.parent[0];
-  const r = await fetch(`http://127.0.0.1:${PORT}/version/${before}/rollback`, { method: "POST", signal: AbortSignal.timeout(60_000) })
+  const r = await fetch(`http://127.0.0.1:${PORT}/versions/${before}/rollback`, { method: "POST", signal: AbortSignal.timeout(60_000) })
     .then((x) => x.json()).catch((e) => ({ error: String(e) }));
   await s.stop();
   eq(r, { ok: true }, "the rollback answers (to a version with nothing in built/: it used to hang on EISDIR)");
@@ -421,7 +421,7 @@ if (NPM) {
     const exited = new Promise((r) => p.on("exit", r));
     for (let i = 0; i < 240 && !/chalky \(pi\) on/.test(read(file)) && p.exitCode === null; i++) await wait(250);
     for (let i = 0; i < 40 && !(await log(h, "main")).length; i++) await wait(250);  // 0.1.5 saves its first version after starting
-    const update = /chalky \(pi\) on/.test(read(file)) ? await (await fetch(`http://127.0.0.1:${PORT}/version/update`)).json().catch(() => "no route") : "did not start: " + read(file);
+    const update = /chalky \(pi\) on/.test(read(file)) ? await (await fetch(`http://127.0.0.1:${PORT}/versions/update`)).json().catch(() => "no route") : "did not start: " + read(file);
     p.kill(); await exited;
     return update;
   };

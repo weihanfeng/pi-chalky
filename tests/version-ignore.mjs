@@ -14,7 +14,7 @@ const KEPT = { filepaths: ["agent", "built"], ignored: true };
 const planted = [path.join(HOME, "agent/extensions/card/node_modules/zz-ignore-test/index.js"),
                  path.join(HOME, "built/apps/zz-ignore-test/node_modules/zz-ignore-test/dep.js")];
 const logins = ["auth.json", "models-store.json"].map((f) => path.join(HOME, "agent", f)).filter((f) => fs.existsSync(f));
-const commits = async () => (await (await fetch(`http://127.0.0.1:${PORT}/version`)).json()).length;
+const commits = async () => (await (await fetch(`http://127.0.0.1:${PORT}/versions`)).json()).length;
 const sessions = path.join(HOME, "data/sessions/agent1");
 const warnings = () => fs.readdirSync(sessions).filter((f) => f.endsWith(".jsonl"))
   .map((f) => (fs.readFileSync(path.join(sessions, f), "utf8").match(/aren't part of you/g) ?? []).length).reduce((a, b) => a + b, 0);
