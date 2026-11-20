@@ -8,7 +8,7 @@
 //   logout    the saved logins, each with Log out / Remove
 //   model     (/model, and after connecting) the usable models, grouped by provider; "Use for" all agents or one agent
 //             (an agent's own choice wins; "Same as all agents" drops it). A tick shows which agents use a model now
-// The server does the work (index.ts); keys typed here go to it once and never come back. CHALKY_LOGIN=off: no commands.
+// The server does the work (index.ts); keys typed here go to it once and never come back. CHALKY_LOGIN=off: /model only.
 export default function (page) {
   const APIS = { "openai-completions": "OpenAI", "openai-responses": "OpenAI Responses", "anthropic-messages": "Anthropic",
                  "google-generative-ai": "Google" };  // the API the endpoint speaks
@@ -354,10 +354,11 @@ export default function (page) {
     onSignIn(ev);
   });
 
-  fetch("/model/on").then((r) => {  // CHALKY_LOGIN=off: the server has no sign-ins, and the page no commands
+  fetch("/model/on").then((r) => {  // 204: sign-ins too; 200 (CHALKY_LOGIN=off): the picker only
     if (!r.ok) return;
+    page.command("model", () => open(() => showModels()), "Choose the model, for all agents or one");
+    if (r.status !== 204) return;
     page.command("login", () => open(showList), "Connect a model: sign in with a subscription, or a custom endpoint");
     page.command("logout", () => open(showLogout), "Remove a saved login");
-    page.command("model", () => open(() => showModels()), "Choose the model, for all agents or one");
   });
 }
