@@ -279,7 +279,6 @@ export default function (page) {
     const key = (m) => m ? `${m.provider}/${m.id}` : "same";
     const firstAgentModel = data.agents[0]?.model;
     form = { scope: "all", pick: key(data.default ?? firstAgentModel) };
-    const label = (k) => k === "same" ? "the all-agents model" : k.slice(k.indexOf("/") + 1);
     function render() {
       const agent = data.agents.find((a) => a.name === form.scope);
       const users = (k) => data.agents.filter((a) => key(a.model) === k).map((a) => a.name);
@@ -295,7 +294,7 @@ export default function (page) {
             <span class="model-id">${esc(m.id)}</span><span class="how">${who.map((n) => `${esc(n)} ✓`).join(" ")}${who.length && m.context ? " · " : ""}${m.context ? `${Math.round(m.context / 1000)}k` : ""}</span></div>`;
         }).join("")}</div>`).join("") || `<div class="hint">No models yet: type /login to connect one.</div>`}
         <div class="error"></div>
-        <div class="btns"><button class="btn primary use">Use ${esc(label(form.pick))}</button></div>`;
+        <div class="btns"><button class="btn primary use">Select</button></div>`;
       for (const b of body.querySelectorAll(".seg button")) b.onclick = () => {
         form.scope = b.dataset.for;
         const a = data.agents.find((x) => x.name === form.scope);
@@ -306,7 +305,6 @@ export default function (page) {
         form.pick = r.dataset.k;
         for (const x of body.querySelectorAll(".row.on")) x.classList.remove("on");
         r.classList.add("on");
-        body.querySelector(".use").textContent = `Use ${label(form.pick)}`;
       };
       const search = body.querySelector(".search");
       search.oninput = () => {

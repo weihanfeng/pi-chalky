@@ -223,8 +223,9 @@ const host = {
     } });
     // the model: the one picked with /login or /model, else the MODEL_BASE_URL endpoint's MODEL_NAME (both: extensions/model).
     // A pick no longer usable (signed out; hosted: not in the owner's plan any more) is skipped
+    await session.modelRuntime.refresh({ providers: ["chalky"] });  // the endpoint's models as of now (extensions/model/routes.ts)
     const picked = host.api.model?.modelFor(name, session);
-    const model = picked ?? session.modelRuntime.getModel("chalky", process.env.MODEL_NAME || "default");
+    const model = picked ?? host.api.model?.fallback(session) ?? session.modelRuntime.getModel("chalky", process.env.MODEL_NAME || "default");
     if (model) await session.setModel(model);
     // thinking level: the agent's own (the /thinking command), which pi keeps in its session file; an empty
     // conversation starts at "medium". Set here: pi restores it only when it knows the model then, and ours (the

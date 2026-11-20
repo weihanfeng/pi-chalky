@@ -26,6 +26,7 @@ import http from "node:http";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { ModelRuntime, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { fallback } from "./routes.ts";
 
 const host = (globalThis as any).chalky;
 const MODELS = path.join(host.agent, "models.json");
@@ -70,13 +71,12 @@ function modelFor(name: string, session: any) {
     if (c && rt.hasConfiguredAuth(c.provider)) { const m = rt.getModel(c.provider, c.id); if (m) return m; }
   return undefined;
 }
-const fallback = (session: any) => session.modelRuntime.getModel("chalky", process.env.MODEL_NAME || "default");  // index.ts
 async function apply(a: any) {  // put an agent on the model it should use now (after a choice, a login or a logout)
   const m = modelFor(a.name, a.session) ?? fallback(a.session);
   const cur = a.session.model;
   if (m && !(cur && cur.provider === m.provider && cur.id === m.id)) await a.session.setModel(m);
 }
-host.api.model = { modelFor };
+host.api.model = { modelFor, fallback };
 
 async function status(rt: ModelRuntime, id: string) {
   if (!rt.getProviderAuthStatus(id).configured) return undefined;
@@ -108,6 +108,10 @@ export default function (pi: ExtensionAPI) {
     res.writeHead(500, { "content-type": "text/plain" }).end(String(e?.message ?? e))));
   async function models(res: any) {  // read through an agent's runtime: it also has the MODEL_BASE_URL endpoint ("chalky")
     const agents = [...host.agents.values()], s = readState();
+    for (const a of agents) {  // the MODEL_BASE_URL endpoint's models as of now (routes.ts); an agent whose model
+      await a.session.modelRuntime.refresh({ providers: ["chalky"] });  // isn't offered any more moves at once
+      await apply(a);
+    }
     const rt = agents[0]?.session.modelRuntime;
     const groups = new Map<string, any>();
     for (const m of rt ? await rt.getAvailable() : []) {
