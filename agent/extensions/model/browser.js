@@ -9,6 +9,7 @@
 //   model     (/model, and after connecting) the usable models, grouped by provider; "Use for" all agents or one agent
 //             (an agent's own choice wins; "Same as all agents" drops it). A tick shows which agents use a model now
 // The server does the work (index.ts); keys typed here go to it once and never come back. CHALKY_LOGIN=off: /model only.
+// With nothing set up (GET /model/ready), the list opens by itself when the page loads.
 export default function (page) {
   const APIS = { "openai-completions": "OpenAI", "openai-responses": "OpenAI Responses", "anthropic-messages": "Anthropic",
                  "google-generative-ai": "Google" };  // the API the endpoint speaks
@@ -358,5 +359,7 @@ export default function (page) {
     if (r.status !== 204) return;
     page.command("login", () => open(showList), "Connect a model: sign in with a subscription, or a custom endpoint");
     page.command("logout", () => open(showLogout), "Remove a saved login");
+    // nothing set up yet: open /login now, on each page load until something is
+    fetch("/model/ready").then((r) => r.ok && r.json()).then((d) => { if (d && !d.ready && !sheet.open) open(showList); }).catch(() => {});
   });
 }

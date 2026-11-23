@@ -11,6 +11,8 @@
 // CHALKY_LOGIN=off (hosted: the platform's endpoint, its models set by the owner's plan): no sign-ins or custom
 // endpoints, only the picker over that endpoint's models (index.ts); anyone who can open the page may change it.
 //   GET /model/on       204: sign-ins and the picker; 200 (CHALKY_LOGIN=off): the picker only
+//   GET /model/ready    {ready}: false when nothing is set up (no sign-in, key, custom endpoint or MODEL_BASE_URL):
+//                       the page then opens /login by itself
 //   GET /model/choices  {groups: [{provider, name, models: [{id, name, context}]}] (usable now), default, agents: [{name, model, own}]}
 //   GET /model/logins   {providers: [{id, name, subscription, status}], custom: [{id, baseUrl, api, models, status}]}
 //                       status: "connected" | "expired" | undefined; each call checks the stored sign-ins (pi renews one that is due)
@@ -123,6 +125,16 @@ export default function (pi: ExtensionAPI) {
       groups: [...groups.values()], default: s.default ?? null,
       agents: agents.filter((a) => !a.app).map((a) => ({ name: a.name, model: a.session.model ? { provider: a.session.model.provider, id: a.session.model.id } : null,
         own: !!s.agents?.[a.name] })) }));
+  }
+
+  if (signIn) host.routes.set("/model/ready", (_req: any, res: any) => ready().then((ready) =>
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ready }))).catch((e) =>
+    res.writeHead(500, { "content-type": "text/plain" }).end(String(e?.message ?? e))));
+  async function ready() {
+    if (process.env.MODEL_BASE_URL) return true;
+    const rt = await runtime();
+    await rt.refresh();
+    return (await rt.getAvailable()).length > 0;
   }
 
   if (signIn) host.routes.set("/model/logins", (_req: any, res: any) => list(res).catch((e) =>
