@@ -8,7 +8,7 @@
 //   logout    the saved logins, each with Log out / Remove
 //   model     (/model, and after connecting) the usable models, grouped by provider; "Use for" all agents or one agent
 //             (an agent's own choice wins; "Same as all agents" drops it). A tick shows which agents use a model now
-// The server does the work (index.ts); keys typed here go to it once and never come back. CHALKY_LOGIN=off: no commands.
+// The server does the work (index.ts); keys typed here go to it once and never come back. CHALKY_LOGIN=off: /model only.
 export default function (page) {
   const APIS = { "openai-completions": "OpenAI", "openai-responses": "OpenAI Responses", "anthropic-messages": "Anthropic",
                  "google-generative-ai": "Google" };  // the API the endpoint speaks
@@ -279,7 +279,6 @@ export default function (page) {
     const key = (m) => m ? `${m.provider}/${m.id}` : "same";
     const firstAgentModel = data.agents[0]?.model;
     form = { scope: "all", pick: key(data.default ?? firstAgentModel) };
-    const label = (k) => k === "same" ? "the all-agents model" : k.slice(k.indexOf("/") + 1);
     function render() {
       const agent = data.agents.find((a) => a.name === form.scope);
       const users = (k) => data.agents.filter((a) => key(a.model) === k).map((a) => a.name);
@@ -295,7 +294,7 @@ export default function (page) {
             <span class="model-id">${esc(m.id)}</span><span class="how">${who.map((n) => `${esc(n)} ✓`).join(" ")}${who.length && m.context ? " · " : ""}${m.context ? `${Math.round(m.context / 1000)}k` : ""}</span></div>`;
         }).join("")}</div>`).join("") || `<div class="hint">No models yet: type /login to connect one.</div>`}
         <div class="error"></div>
-        <div class="btns"><button class="btn primary use">Use ${esc(label(form.pick))}</button></div>`;
+        <div class="btns"><button class="btn primary use">Select</button></div>`;
       for (const b of body.querySelectorAll(".seg button")) b.onclick = () => {
         form.scope = b.dataset.for;
         const a = data.agents.find((x) => x.name === form.scope);
@@ -306,7 +305,6 @@ export default function (page) {
         form.pick = r.dataset.k;
         for (const x of body.querySelectorAll(".row.on")) x.classList.remove("on");
         r.classList.add("on");
-        body.querySelector(".use").textContent = `Use ${label(form.pick)}`;
       };
       const search = body.querySelector(".search");
       search.oninput = () => {
@@ -354,10 +352,11 @@ export default function (page) {
     onSignIn(ev);
   });
 
-  fetch("/model/on").then((r) => {  // CHALKY_LOGIN=off: the server has no sign-ins, and the page no commands
+  fetch("/model/on").then((r) => {  // 204: sign-ins too; 200 (CHALKY_LOGIN=off): the picker only
     if (!r.ok) return;
+    page.command("model", () => open(() => showModels()), "Choose the model, for all agents or one");
+    if (r.status !== 204) return;
     page.command("login", () => open(showList), "Connect a model: sign in with a subscription, or a custom endpoint");
     page.command("logout", () => open(showLogout), "Remove a saved login");
-    page.command("model", () => open(() => showModels()), "Choose the model, for all agents or one");
   });
 }

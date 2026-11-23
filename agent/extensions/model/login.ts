@@ -8,8 +8,9 @@
 // {deviceId, default: {provider, id} (all agents), agents: {name: {provider, id}} (one agent's own; it wins)}.
 // server.ts asks host.api.model.modelFor(name, session) when it starts an agent: its own choice, else the all-agents
 // one, else nothing (then the MODEL_BASE_URL endpoint, index.ts); a choice whose login is gone is skipped.
-// CHALKY_LOGIN=off (a cloud deployment, where the backend fixes the endpoint): none of this loads, and server.ts doesn't ask.
-//   GET /model/on       204 (so the page knows sign-ins are on)
+// CHALKY_LOGIN=off (hosted: the platform's endpoint, its models set by the owner's plan): no sign-ins or custom
+// endpoints, only the picker over that endpoint's models (index.ts); anyone who can open the page may change it.
+//   GET /model/on       204: sign-ins and the picker; 200 (CHALKY_LOGIN=off): the picker only
 //   GET /model/choices  {groups: [{provider, name, models: [{id, name, context}]}] (usable now), default, agents: [{name, model, own}]}
 //   GET /model/logins   {providers: [{id, name, subscription, status}], custom: [{id, baseUrl, api, models, status}]}
 //                       status: "connected" | "expired" | undefined; each call checks the stored sign-ins (pi renews one that is due)
@@ -21,9 +22,11 @@
 //                       callback came first) | {step: "done", provider} | {step: "cancelled"} | {step: "error", text} | {step: "models", models}
 //                       (model_probe's answer) | {step: "changed"} (a login, endpoint or model changed: agents are synced)
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { ModelRuntime, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { fallback } from "./routes.ts";
 
 const host = (globalThis as any).chalky;
 const MODELS = path.join(host.agent, "models.json");
@@ -34,6 +37,23 @@ const APIS = ["openai-completions", "openai-responses", "anthropic-messages", "g
 if (!host.shared.has("model-runtime"))
   host.shared.set("model-runtime", ModelRuntime.create({ authPath: path.join(host.agent, "auth.json"), modelsPath: MODELS }));
 const runtime = (): Promise<ModelRuntime> => host.shared.get("model-runtime");
+
+// The page a sign-in's browser tab lands on is pi's (its callback server, in this process), with pi's logo: put
+// Chalky's mark (a chalkboard) in its place. pi has no option for it, so the page is changed on its way out: only
+// a body with pi's logo in its "logo" box (the sign-in pages), the rest of pi's page is kept as it is. Once per process.
+const MARK = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke-linecap="round">` +
+  `<rect x="2" y="4" width="20" height="14" rx="2.5" fill="#2f4f45"/>` +
+  `<path d="M6 12.5c1.3-2.6 2.7-2.6 4 0s2.7 2.6 4 0 2.7-2.6 4 0" stroke="#fff" stroke-width="1.6"/>` +
+  `<path d="M9 21h6" stroke="#a1a1aa" stroke-width="1.6"/></svg>`;
+if (!host.shared.has("model-page")) {
+  host.shared.set("model-page", true);
+  const end = http.ServerResponse.prototype.end as any;
+  http.ServerResponse.prototype.end = function (this: any, chunk: any, ...rest: any[]) {
+    if (typeof chunk === "string" && chunk.includes('<div class="logo"><svg') && chunk.includes("#F09082"))
+      chunk = chunk.replace(/<div class="logo"><svg[\s\S]*?<\/svg><\/div>/, `<div class="logo">${MARK}</div>`);
+    return end.call(this, chunk, ...rest);
+  } as any;
+}
 
 const readModels = () => (fs.existsSync(MODELS) ? JSON.parse(fs.readFileSync(MODELS, "utf8")) : { providers: {} });
 const readState = () => (fs.existsSync(STATE) ? JSON.parse(fs.readFileSync(STATE, "utf8")) : {});
@@ -51,13 +71,12 @@ function modelFor(name: string, session: any) {
     if (c && rt.hasConfiguredAuth(c.provider)) { const m = rt.getModel(c.provider, c.id); if (m) return m; }
   return undefined;
 }
-const fallback = (session: any) => session.modelRuntime.getModel("chalky", process.env.MODEL_NAME || "default");  // index.ts
 async function apply(a: any) {  // put an agent on the model it should use now (after a choice, a login or a logout)
   const m = modelFor(a.name, a.session) ?? fallback(a.session);
   const cur = a.session.model;
   if (m && !(cur && cur.provider === m.provider && cur.id === m.id)) await a.session.setModel(m);
 }
-host.api.model = { modelFor };
+host.api.model = { modelFor, fallback };
 
 async function status(rt: ModelRuntime, id: string) {
   if (!rt.getProviderAuthStatus(id).configured) return undefined;
@@ -73,26 +92,30 @@ async function synced() {  // a login or endpoint changed: every runtime reads t
 const fail = (e: any) => host.broadcast("model", { step: "error", text: e?.message ?? String(e) });
 
 export default function (pi: ExtensionAPI) {
-  if (process.env.CHALKY_LOGIN === "off") return;
+  const signIn = process.env.CHALKY_LOGIN !== "off";
 
   // at start, once: renew the sign-ins that are due, and say which failed (server log)
   pi.on("session_start", async () => {
-    if (host.shared.has("model-checked")) return;
+    if (!signIn || host.shared.has("model-checked")) return;
     host.shared.set("model-checked", true);
     const rt = await runtime();
     for (const c of await rt.listCredentials())
       if (c.type === "oauth" && (await status(rt, c.providerId)) === "expired") console.error(`login: the ${c.providerId} sign-in has expired (/login)`);
   });
 
-  host.routes.set("/model/on", (_req: any, res: any) => res.writeHead(204).end());  // browser.js: add the commands only when this answers
+  host.routes.set("/model/on", (_req: any, res: any) => res.writeHead(signIn ? 204 : 200).end());  // browser.js: which commands
   host.routes.set("/model/choices", (_req: any, res: any) => models(res).catch((e) =>
     res.writeHead(500, { "content-type": "text/plain" }).end(String(e?.message ?? e))));
   async function models(res: any) {  // read through an agent's runtime: it also has the MODEL_BASE_URL endpoint ("chalky")
     const agents = [...host.agents.values()], s = readState();
+    for (const a of agents) {  // the MODEL_BASE_URL endpoint's models as of now (routes.ts); an agent whose model
+      await a.session.modelRuntime.refresh({ providers: ["chalky"] });  // isn't offered any more moves at once
+      await apply(a);
+    }
     const rt = agents[0]?.session.modelRuntime;
     const groups = new Map<string, any>();
     for (const m of rt ? await rt.getAvailable() : []) {
-      if (!groups.has(m.provider)) groups.set(m.provider, { provider: m.provider, name: m.provider === "chalky" ? "Chalky LiteLLM (MODEL_BASE_URL)"
+      if (!groups.has(m.provider)) groups.set(m.provider, { provider: m.provider, name: m.provider === "chalky" ? (signIn ? "Chalky LiteLLM (MODEL_BASE_URL)" : "Chalky")
         : (readModels().providers[m.provider] ? `${m.provider} (custom)` : rt.getProvider(m.provider)?.name ?? m.provider), models: [] });
       groups.get(m.provider).models.push({ id: m.id, name: m.name, context: m.contextWindow });
     }
@@ -102,7 +125,7 @@ export default function (pi: ExtensionAPI) {
         own: !!s.agents?.[a.name] })) }));
   }
 
-  host.routes.set("/model/logins", (_req: any, res: any) => list(res).catch((e) =>
+  if (signIn) host.routes.set("/model/logins", (_req: any, res: any) => list(res).catch((e) =>
     res.writeHead(500, { "content-type": "text/plain" }).end(String(e?.message ?? e))));
   async function list(res: any) {
     const rt = await runtime();
@@ -117,6 +140,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   host.pageHandlers.set("model", async (msg: any) => {
+    if (!signIn && msg.type !== "model_set") return;  // hosted: picking only
     const flow = host.shared.get("model-flow");  // the sign-in under way: {abort, answer?}
     if (msg.type === "model_answer") return flow?.answer?.(String(msg.text ?? ""));
     if (msg.type === "model_cancel") return flow?.abort.abort();
@@ -184,7 +208,7 @@ export default function (pi: ExtensionAPI) {
       const s = readState(), who = String(msg.for ?? "all"), rt = host.agents.values().next().value?.session.modelRuntime;
       const choice = msg.provider ? { provider: String(msg.provider), id: String(msg.id) } : undefined;
       if (choice && !(rt?.hasConfiguredAuth(choice.provider) && rt.getModel(choice.provider, choice.id)))
-        return fail(`${choice.provider}/${choice.id} isn't usable now: connect it with /login`);
+        return fail(`${choice.provider}/${choice.id} isn't usable now: ${signIn ? "connect it with /login" : "not offered by this endpoint"}`);
       if (who === "all") {
         if (!choice) return fail("Pick a model");
         s.default = choice;
