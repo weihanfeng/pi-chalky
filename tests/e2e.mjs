@@ -219,7 +219,7 @@ try {
   check((await get("/app/agents.js")).status === 200 && (await get("/voice/voice.js")).status === 200, "/app/agents.js and /voice/voice.js");
 
   section("model, mcp, commands, voice, version, screen");
-  check((await get("/model/on")).status === 204 && Array.isArray((await get("/model/logins")).body.providers), "/model/on, /model/logins");
+  check((await get("/model/on")).status === 204 && Array.isArray((await get("/model/logins")).body.providers) && typeof (await get("/model/ready")).body.ready === "boolean", "/model/on, /model/logins, /model/ready");
   check(Array.isArray((await get("/model/choices")).body.groups), "/model/choices");
   mark = events.length;
   send({ type: "mcp_list" });
