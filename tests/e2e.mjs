@@ -224,15 +224,19 @@ try {
   mark = events.length;
   send({ type: "mcp_list" });
   const mcp = await waitFor((e) => e.type === "mcp", 15000, mark);
-  check(!!mcp && "gateway" in (mcp.servers ?? {}), "mcp_list -> event mcp with the servers", JSON.stringify(mcp).slice(0, 200));
-  const tools = mcp?.servers?.gateway?.tools ?? [];
-  check(tools.length > 0, "the gateway's tools are listed", mcp?.error ?? `${tools.length} tools`);
-  if (tools.length) {
-    send({ type: "mcp_set", server: "gateway", tool: tools[0].name, on: false }); await sleep(1500);
-    const off = JSON.parse(fs.readFileSync(path.join(HOME, "agent/mcp.json"), "utf8")).mcpServers.gateway.toolExposure?.[tools[0].name];
-    send({ type: "mcp_set", server: "gateway", tool: tools[0].name, on: true }); await sleep(1500);
-    check(off === "hidden", "mcp_set turns a tool off (and on again)", String(off));
-  }
+  const MCP_FILE = path.join(HOME, "agent/mcp.json");
+  check(!fs.existsSync(MCP_FILE) && !!mcp && !mcp.error && Object.keys(mcp.servers ?? {}).length === 0,
+    "a new home: no mcp.json, so mcp_list -> no servers and no error", JSON.stringify(mcp).slice(0, 200));
+  // a server the user added (nothing listens there: only the file is checked)
+  fs.writeFileSync(MCP_FILE, JSON.stringify({ mcpServers: { mine: { url: "http://127.0.0.1:9/mcp" } } }));
+  mark = events.length;
+  send({ type: "mcp_list" });
+  const listed = await waitFor((e) => e.type === "mcp", 15000, mark);
+  check("mine" in (listed?.servers ?? {}) && !listed.error, "mcp_list lists a server added to mcp.json", JSON.stringify(listed).slice(0, 200));
+  send({ type: "mcp_set", server: "mine", on: false }); await sleep(1500);
+  check(JSON.parse(fs.readFileSync(MCP_FILE, "utf8")).mcpServers.mine.enabled === false, "mcp_set turns a server off in the file");
+  fs.rmSync(MCP_FILE);
+  await sleep(1500);  // the reloads mcp_set started
   const cmds = (await get("/command")).body;
   check(["compact", "thinking", "new"].every((c) => cmds.some((x) => x.name === c)), "GET /command lists compact, thinking, new");
   mark = events.length;
