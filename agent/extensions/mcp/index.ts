@@ -12,8 +12,14 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 const host = (globalThis as any).chalky;
 const FILE = path.join(host.agent, "mcp.json");
 
+// The file is the user's and no release ships it, so a new home has none: that's no servers yet, not an error.
+function read() {
+  try { return JSON.parse(fs.readFileSync(FILE, "utf8")); }
+  catch (e: any) { if (e.code === "ENOENT") return {}; throw e; }
+}
+
 function state() {
-  const servers = JSON.parse(fs.readFileSync(FILE, "utf8")).mcpServers ?? {};
+  const servers = read().mcpServers ?? {};
   const tools = host.agents.get("agent1")?.session.getAllTools() ?? [];
   const out: Record<string, any> = {};
   for (const [name, c] of Object.entries<any>(servers)) {
@@ -28,7 +34,7 @@ function state() {
 }
 
 function set(msg: any) {
-  const json = JSON.parse(fs.readFileSync(FILE, "utf8")), c = json.mcpServers?.[msg.server];
+  const json = read(), c = json.mcpServers?.[msg.server];
   if (!c) return;
   if (msg.tool === undefined) { if (msg.on) delete c.enabled; else c.enabled = false; }
   else {

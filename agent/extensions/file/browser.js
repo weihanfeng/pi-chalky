@@ -21,12 +21,12 @@ export default async function (page) {
     #side .file-toggle:hover { background: var(--hover); color: var(--text); }
     #side[data-open] .file-toggle { background: var(--glass-strong); color: var(--text);
                                      box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06), inset 0 0 0 1px var(--edge); }
-    #side .files { display: none; width: 220px; max-height: calc(100vh - 140px); overflow-y: auto; margin: 8px 9px 0 0;
+    #side .file-list { display: none; width: 220px; max-height: calc(100vh - 140px); overflow-y: auto; margin: 8px 9px 0 0;
                    padding: 8px; box-sizing: border-box; border-radius: var(--radius); font-size: 13px;
                    background: var(--glass-strong); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
                    border: 1px solid var(--edge); box-shadow: var(--shadow); }
-    #side[data-open] .files { display: block; }
-    #side[data-over] .files { outline: 2px solid var(--accent); outline-offset: -2px; }
+    #side[data-open] .file-list { display: block; }
+    #side[data-over] .file-list { outline: 2px solid var(--accent); outline-offset: -2px; }
     #side .file-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 8px; color: var(--soft); cursor: grab; }
     #side .file-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #side .file-row input { appearance: none; -webkit-appearance: none; margin: 0; flex: none; visibility: hidden;
