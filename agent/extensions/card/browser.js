@@ -14,6 +14,10 @@
 //   double-click  turn it over: the back side shows what it is for (about), what it was made from, and
 //                 each block's levers (sentences from its about block; the words in them change it)
 //   ✕             close it; if other cards read from it, the label asks first (they get a copy)
+// Hold ⌘ (Ctrl elsewhere) and drag any part of a card: the same as dragging its label (no hold to pin), for a label
+// that is covered or out of view. While ⌘ or ⌥ is held, apps' frames let go of the mouse (so the history's ⌥-drag
+// rewind works over them too); the keys are heard from inside an app's frame as well. The label stays in view: inside
+// the card's top edge when the card's top is out of view, and slid right when its left is.
 // The corner resizes it (unless resizable: false). Moving or resizing one first pins every stacked card
 // where it is (else the ones below would jump up).
 // Typing into a bound field changes the data at once and sends {type: "card_set"} shortly after: saved, and
@@ -51,6 +55,11 @@ const CSS = `
   [data-card][data-pinned] { outline: 2px solid #d4691e; outline-offset: 4px; border-radius: 6px; }
   [data-card][data-pinned] > .card-label { cursor: default; }
   [data-card][data-pinned] > .card-resize { display: none; }
+  [data-card][data-label-in] > .card-label { bottom: auto; top: 0; }
+  body.frames-off [data-card] iframe { pointer-events: none; }
+  body.card-moving [data-card][data-movable] { cursor: move; }
+  body.card-moving [data-card][data-movable] > .card-body { pointer-events: none; }
+  body.card-moving [data-card][data-movable]:hover { outline: 2px dashed var(--accent, #0071e3); outline-offset: 4px; border-radius: 6px; }
   [data-card][data-drop] { outline: 3px solid var(--accent, #0071e3); outline-offset: 4px; border-radius: 6px; }
   [data-card][data-flipped] { z-index: 5; }  /* the back side stays above its neighbours */
   [data-card][data-flipped] > .card-body { visibility: hidden; }
@@ -122,6 +131,13 @@ export default async function (page) {
       s.body = el("div", { class: "card-body" });
       s.box.append(s.label, s.body, el("div", { class: "card-resize", title: "Drag to resize", onpointerdown: (e) => resize(s, id, e) }));
       s.label.onpointerdown = (e) => drag(s, id, e);
+      s.box.addEventListener("pointerdown", (e) => {  // ⌘-drag anywhere on it (the label and corner do their own)
+        if (e.button !== 0 || !moveKey(e) || e.target.closest(".card-label, .card-resize")) return;
+        e.preventDefault();
+        e.stopPropagation();
+        drag(s, id, e, { pin: false });
+      });
+      s.box.addEventListener("pointerenter", () => placeLabel(s));
       s.label.ondblclick = () => { s.flipped = !s.flipped; draw(id); };
       s.nodes = {};
       area.append(s.box);
@@ -131,6 +147,7 @@ export default async function (page) {
     s.box.dataset.board = s.board ?? 1;  // its board: board/browser.js shows it there
     s.box.querySelector(".card-resize").hidden = s.resizable === false;
     s.box.toggleAttribute("data-pinned", !!s.pinned);
+    s.box.toggleAttribute("data-movable", !s.pinned && s.draggable !== false);
     s.box.toggleAttribute("data-flipped", !!s.flipped);
     s.box.toggleAttribute("data-options", !!s.options);
     const p = s.place;
@@ -358,18 +375,49 @@ export default async function (page) {
     }
   }
 
+  // ⌘ (Ctrl elsewhere) and ⌥ held, heard from the page and from inside apps' frames (same site; while an app has the
+  // keys, the page hears nothing). Pointer moves carry the keys too, which catches a key let go elsewhere.
+  const MAC = /Mac|iP(hone|ad)/.test(navigator.platform);
+  const moveKey = (e) => !!(MAC ? e.metaKey : e.ctrlKey);
+  let heldMove = false, heldAlt = false;
+  function keys(e) {
+    const m = moveKey(e), a = !!e.altKey;
+    if (m === heldMove && a === heldAlt) return;
+    heldMove = m, heldAlt = a;
+    document.body.classList.toggle("card-moving", m);
+    document.body.classList.toggle("frames-off", m || a);
+  }
+  const hear = (w) => {
+    for (const t of ["keydown", "keyup", "pointermove"]) w.addEventListener(t, keys, true);
+    w.addEventListener("blur", () => keys({}));  // switched away with it held: it is let go elsewhere
+  };
+  hear(window);
+  area.addEventListener("load", (e) => {  // an app's frame, each time it loads
+    if (e.target.localName === "iframe") try { hear(e.target.contentWindow); } catch {}  // another site's frame
+  }, true);
+
+  function placeLabel(s) {  // keep the label in view: at the top of the card's visible part if its top is out of view; slid right if its left is
+    const z = parseFloat(area.style.zoom) || 1, r = s.box.getBoundingClientRect(), v = area.getBoundingClientRect();
+    const viewTop = Math.max(v.top, 0), lh = (s.label.offsetHeight || 20) * z, inside = r.top - lh < viewTop;
+    s.box.toggleAttribute("data-label-in", inside);
+    s.label.style.top = inside ? `${Math.max(0, Math.min(viewTop - r.top, r.height - lh)) / z}px` : "";
+    const shift = (Math.max(v.left, 0) - r.left) / z;
+    s.label.style.left = `${Math.max(0, Math.min(shift, s.box.offsetWidth - s.label.offsetWidth))}px`;
+  }
+
   function cardAt(x, y, except) {  // the card under a window point, other than `except`
     return document.elementsFromPoint(x, y).map((e) => e.closest?.("[data-card]")).find((b) => b && b !== except) || null;
   }
 
-  function drag(s, id, e) {  // hold: pin; move: drag it; hold still over another card, then release: combine
+  // hold: pin (unless pin: false); move: drag it; hold still over another card, then release: combine
+  function drag(s, id, e, { pin = true } = {}) {
     if (e.target.closest("button")) return;
     const handle = e.currentTarget, box = s.box;
     handle.setPointerCapture(e.pointerId);  // keep getting moves over iframes and other cards
     let place = null, held = false, x0 = 0, y0 = 0;
     const z = parseFloat(area.style.zoom) || 1;  // the board's zoom (board/browser.js): window px moved -> main px
     let under = null, armed = null, wait = null, sx = 0, sy = 0;  // the card under the pointer; armed: lit, ready to combine
-    const hold = setTimeout(() => { held = true; page.send({ type: "card_pin", card: id, pinned: !s.pinned }); }, HOLD_MS);
+    const hold = pin && setTimeout(() => { held = true; page.send({ type: "card_pin", card: id, pinned: !s.pinned }); }, HOLD_MS);
     handle.onpointermove = (ev) => {
       if (held || Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 5) return;
       clearTimeout(hold);

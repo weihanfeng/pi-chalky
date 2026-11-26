@@ -38,7 +38,7 @@ Before building or restyling what the user sees, load the design skill (how it s
 - Cards stack in the main space and are as wide as their content. place={"x", "y", "width"?, "height"?}
   (px from the main space's top-left) pins one at a spot instead: use it when the user points at a spot ("here")
   or draws an area (then fill that area: its x, y, width and height).
-- Everything you show is draggable by default: the user moves a card by its label (shown on hover), and it stays
+- Everything you show is draggable by default: the user moves a card by its label (shown on hover), or anywhere on it with ⌘ (Ctrl) held, and it stays
   where they put it (card_show without place keeps it there; where things are now: the "place" of each card in
   {built}/card.json). Pass draggable=false only when the user wants something fixed. In an app you build, make
   separate pieces draggable too, unless told otherwise.
