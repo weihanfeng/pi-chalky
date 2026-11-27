@@ -1,13 +1,14 @@
 # Chalky
 
-Tell AI agents what you want and they build it on the page: a form, a table, a dashboard, a small app. To change
-something, point at it, draw on it or leave a note on it.
+Most AI tools only let you talk to the agent in words. In Chalky you can also point, draw, sketch or drop in files,
+and the agents answer the same way, with notes and drawings on the page.
+
+Ask for a team when a job needs one, and the agents work side by side. Every app they build is agentic by default.
+And Chalky can change itself: its interface and tools are files the agents can edit.
+
+Chalky is built on [pi](https://github.com/earendil-works/pi).
 
 <!-- demo.gif -->
-
-Most AI builders make you describe changes in a chat: "no, the button under the second table". In Chalky you click
-the thing, or draw on it, and write what you want. The agent is told exactly which element and which source file
-you meant.
 
 ## What you can do
 
@@ -109,7 +110,7 @@ Type `/login` in the page's message box. You can:
 
 - **sign in with an account you already have**: ChatGPT, Claude, GitHub Copilot and others. Chalky opens the
   provider's page and you approve it there;
-- **or add an endpoint with an API key**: any OpenAI-, Anthropic- or Google-compatible API, including local ones.
+- **or add an endpoint with an API key**. Local models work too.
 
 Then type `/model` to choose which model the agents use. You can give each agent its own.
 
@@ -187,21 +188,6 @@ For example, to give the agents web search with [Tavily](https://tavily.com):
 }
 ```
 
-Get a key at [tavily.com](https://tavily.com) and set it in the terminal you start Chalky from, so it stays out of
-the file:
-
-```sh
-# macOS, Linux
-export TAVILY_API_KEY=tvly-...
-chalky
-```
-
-```powershell
-# Windows (PowerShell)
-$env:TAVILY_API_KEY = "tvly-..."
-chalky
-```
-
 ## Settings
 
 Set these in the environment before starting `chalky`. All are optional.
@@ -214,7 +200,6 @@ Set these in the environment before starting `chalky`. All are optional.
 | `TEAM_MAX_AGENTS` | `8` | Most agents working at once |
 | `HISTORY_KEEP_DAYS` | `7` | How long undo and redo steps are kept |
 | `STT_BASE_URL`, `STT_API_KEY`, `STT_MODEL` | browser's own | An OpenAI-compatible speech-to-text endpoint for the microphone (`STT_MODEL` defaults to `whisper-1`) |
-| `MODEL_BASE_URL`, `MODEL_API_KEY`, `MODEL_NAME` | | One OpenAI-compatible endpoint to use without `/login` |
 
 ## Run from source
 
