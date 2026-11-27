@@ -2,6 +2,25 @@
   "name": "@chalky/chalky",
   "version": "0.2.1",
   "description": "Chalky on pi: agents build what you see in the browser, and you point at it and mark it up",
+  "keywords": [
+    "ai",
+    "agents",
+    "ai-agents",
+    "multi-agent",
+    "mcp",
+    "llm",
+    "no-code",
+    "app-builder",
+    "pi"
+  ],
+  "homepage": "https://github.com/weihanfeng/pi-chalky#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/weihanfeng/pi-chalky.git"
+  },
+  "bugs": {
+    "url": "https://github.com/weihanfeng/pi-chalky/issues"
+  },
   "license": "MIT",
   "type": "module",
   "bin": {

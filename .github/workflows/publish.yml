@@ -2,7 +2,8 @@
 # (Actions tab -> "Publish to npm"), typing the version to release. That click is the approval.
 #
 # What it does: sets the version in package.json, publishes to npm, then commits the bump to main
-# and tags it vX.Y.Z. No npm token: npm trusts this workflow file (Trusted Publishing, OIDC).
+# and tags it vX.Y.Z, then makes the GitHub release (don't make one by hand first).
+# No npm token: npm trusts this workflow file (Trusted Publishing, OIDC).
 name: Publish to npm
 
 on:
@@ -42,6 +43,9 @@ jobs:
           echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' || { echo "::error::'$VERSION' is not a version like 0.1.6"; exit 1; }
           name=$(node -p 'require("./package.json").name')
           if npm view "$name@$VERSION" version >/dev/null 2>&1; then echo "::error::$name@$VERSION is already on npm"; exit 1; fi
+          # A GitHub release made by hand makes its tag too, and the tag push at the end would then fail after
+          # publishing. This workflow makes the release itself.
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null; then echo "::error::tag v$VERSION already exists on GitHub (a release made by hand?). Delete it, or release another version"; exit 1; fi
 
       - name: Set the version
         env:
@@ -73,3 +77,9 @@ jobs:
           git commit -am "Release $VERSION" || echo "version already $VERSION in package.json"
           git tag "v$VERSION"
           git push origin main "v$VERSION"
+
+      - name: GitHub release
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "v$VERSION" --verify-tag --generate-notes --title "v$VERSION"

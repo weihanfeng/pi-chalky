@@ -8,8 +8,6 @@ And Chalky can change itself: its interface and tools are files the agents can e
 
 Chalky is built on [pi](https://github.com/earendil-works/pi).
 
-<!-- demo.gif -->
-
 ## What you can do
 
 <table>
